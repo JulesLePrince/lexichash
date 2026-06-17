@@ -9,6 +9,7 @@ clap = { version = "4.6", features = ["derive"] }
 epserde = "0.12"
 fastrand = "2.4"
 helicase = "0.1"
+rand_xoshiro = "0.8"
 rayon = "1.12"
 wide = "1.5"
 
