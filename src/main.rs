@@ -1,11 +1,9 @@
 use clap::{Args, Parser, Subcommand};
-use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, dna_format::PackedDNA, input::FromFile};
-use lexichash::sketch_builder::SketchBuilder;
+use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::FromFile};
+use lexichash::SketchBuilder;
 use std::thread;
 
-const CONFIG: Config = ParserOptions::default()
-    .and_dna_packed()
-    .config();
+const CONFIG: Config = ParserOptions::default().and_dna_packed().config();
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -68,7 +66,8 @@ fn main() {
             let builder = SketchBuilder::new(args.k, args.prefix_size, threads);
 
             // Create a parser with the desired options
-            let mut parser = FastxParser::<CONFIG>::from_file(&args.input).expect("Cannot open the file");
+            let mut parser =
+                FastxParser::<CONFIG>::from_file(&args.input).expect("Cannot open the file");
 
             // Iterate over records
             if let Some(_event) = parser.next() {
@@ -81,7 +80,6 @@ fn main() {
                 // Build the sketch
                 let sketch = builder.build(&seq);
             }
-
         }
         Command::Compare(args) => todo!(),
     }

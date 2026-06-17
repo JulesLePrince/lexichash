@@ -1,7 +1,7 @@
 pub struct LexicSketch {
     k: u8,
     prefix_size: u8,
-    fingerprint: Vec<u32>
+    fingerprint: Vec<u32>,
 }
 
 impl LexicSketch {
@@ -23,11 +23,11 @@ impl LexicSketch {
 
     pub fn compare(&self, sk: &Self) -> Vec<u32> {
         // TODO
-        return vec![]
+        vec![]
     }
 
     pub fn get_score(&self, sk: &Self) -> f64 {
         // TODO
-        return 0.
+        0.
     }
 }

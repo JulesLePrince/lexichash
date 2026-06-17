@@ -1,2 +1,5 @@
-pub mod sketch;
-pub mod sketch_builder;
+pub(crate) mod builder;
+pub(crate) mod sketch;
+
+pub use builder::parallel::SketchBuilder;
+pub use sketch::LexicSketch;
