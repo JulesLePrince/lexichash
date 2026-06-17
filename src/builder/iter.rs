@@ -38,7 +38,7 @@ impl<'a> Iterator for PrefixIter<'a> {
             self.pos += 1;
             self.current_u64_window = get_u64_unaligned(self.packed_u32_bytes, self.pos);
             self.remaining_inside_window = 16 - self.prefix_size + 1;
-            self.shift_inside_window += 0;
+            self.shift_inside_window = 0;
         }
 
         let current = ((self.current_u64_window >> self.shift_inside_window) as u32)
