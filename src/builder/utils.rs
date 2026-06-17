@@ -1,14 +1,3 @@
-pub fn create_masks(prefix_size: usize, suffix_size: usize) -> Vec<u32> {
-    assert!(suffix_size <= 16);
-    let nb_masks = usize::pow(4, prefix_size as u32);
-    let mut res: Vec<u32> = vec![0; nb_masks];
-    for i in 0..nb_masks {
-        // We shift to have zeros, to prevent xor bugs
-        res[i] = fastrand::u32(..) >> (32 - 2 * suffix_size);
-    }
-    res
-}
-
 pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     // TODO: avoid bound checks, this is slow
 
