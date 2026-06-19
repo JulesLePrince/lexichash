@@ -1,6 +1,7 @@
 use super::utils::get_u64_unaligned;
 use bytemuck::cast_slice;
 
+
 /// Iterate `packed_bytes` over factors of size `prefix_size`
 pub struct KmerIterator<'a> {
     packed_u32_bytes: &'a [u32],
@@ -48,15 +49,34 @@ impl<'a> Iterator for KmerIterator<'a> {
 }
 
 
-// TODO add tests
+// Tests
+
+
 #[cfg(test)]
 mod tests {
+    use helicase::{Config, ParserOptions, FastxParser, input::FromSlice, HelicaseParser, dna_format::PackedDNA};
+    use crate::builder::utils::packed_to_string;
     use super::*;
+
+    const CONFIG: Config = ParserOptions::default().and_dna_packed().config();
 
     #[test]
     fn prefix_iterator() {
-        // Generate random_seq
-        let seq: &[u32] = &[0xDEADBEEF; 1024];
+        // Raw seq
+        let raw_seq: &[u8] = b">test_seq\nCCCTGAGTACGGAAAGCGCGAACGCAGATGCCCTATCGATACGTGGCAAGAGTGTTGTCCAAAGGGGCTACGCCCCTATTGAGTATTTACTATTGATTGTTAGATGTGAGTGCGTCTCAATCCTGCCGTTACTTGACCGTTTATGAGTTTATTATAGTCGTTAATATCTGGTCGAGACGGTGTAAAATACGCTATGCGACACCTGTCGTATATCAGAGAAAAGGGTCGATTCTCAATAAATATCGCCCTCTAAACCAGTTTAGGATGCTCTGGAGCCGAAGGATGGGTTCTTGCAGAATACATCACTTCTAGTAAGCGTCAGGCAAACGGCTTTAACCACCTTAGAAAGGGGCAATCACCCAAAGAATACAGTTGAGTAACGATTGTAAAAATAATGTAACAATGCATCAGTAGGAATCACCTTCACTTTCTTTGTATAGGAGTACGCACTCTTGTGGATACCCTCCGAACTACATACACGGTCCCAGTAACAGAGCT";
+
+        let mut parser = FastxParser::<CONFIG>::from_slice(raw_seq).expect("Failed to initialize parser");
+
+        // Unwrap the result
+        if let Some(_event) = parser.next() {
+            let seq = parser.get_dna_packed();
+            let (packed_bytes, _) = seq.bits();
+            let kmer_it = KmerIterator::new(1, packed_bytes);
+            for kmer in kmer_it {
+                // let kmer_str = packed_to_string(kmer, 20);
+                assert_eq!(kmer, 0);
+            }
+        }
 
     }
 }

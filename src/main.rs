@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
+use epserde::ser::Serialize;
 use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::FromFile};
-use lexichash::SketchBuilder;
+use lexichash::{LexicSketch, SketchBuilder};
 use std::thread;
 
 const CONFIG: Config = ParserOptions::default().and_dna_packed().config();
@@ -55,6 +56,7 @@ struct CompareArgs {
 fn main() {
     let args = Cli::parse();
     match args.command {
+        // Build Sketch
         Command::Build(args) => {
             let threads = args.threads.unwrap_or_else(|| {
                 thread::available_parallelism()
@@ -71,16 +73,20 @@ fn main() {
 
             // Iterate over records
             if let Some(_event) = parser.next() {
-                // get a reference to the header
-                let header = parser.get_header();
-
                 // get a reference to the packed sequence
                 let seq = parser.get_dna_packed();
-
-                // Build the sketch
+                // Build the sketch and serialize it
                 let sketch = builder.build(&seq);
+                sketch.serialize(args.output);
             }
         }
-        Command::Compare(args) => todo!(),
+
+        // Compare two sketches
+        Command::Compare(args) => {
+            let sketch1 = LexicSketch::deserialize(args.sketch_1);
+            let sketch2 = LexicSketch::deserialize(args.sketch_2);
+            let score = sketch1.get_score(&sketch2);
+            println!("The score between sketch 1 and sketch 2 is {}", score);
+        },
     }
 }

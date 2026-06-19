@@ -13,6 +13,7 @@ pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     unsafe { core::ptr::read_unaligned(ptr) }
 }
 
+/// `l` is the number of bases and not bits
 pub fn packed_to_string(packed_bytes: u32, l: usize) -> String {
     let mut tmp = packed_bytes;
     let mut res = String::new();
@@ -29,4 +30,13 @@ pub fn packed_to_string(packed_bytes: u32, l: usize) -> String {
         tmp >>= 2;
     }
     res
+}
+
+/// Fast on ARM only (`RBIT` instruction)
+pub fn min_by_reversed(a: u32, b: u32) -> u32 {
+    if a.reverse_bits() < b.reverse_bits() {
+        a
+    } else {
+        b
+    }
 }

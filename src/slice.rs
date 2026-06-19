@@ -2,7 +2,9 @@ use core::mem::transmute;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rand_xoshiro::rand_core::{Rng, SeedableRng};
 use wide::u32x8;
+use epserde::Epserde;
 
+#[derive(Epserde, Debug)]
 pub struct SketchSlice32(pub Vec<u32>);
 
 impl SketchSlice32 {
@@ -11,13 +13,18 @@ impl SketchSlice32 {
     }
 
     #[allow(clippy::uninit_vec)]
-    pub fn random(prefix_size: usize, seed: u64) -> Self {
+    pub fn random(prefix_size: usize, suffix_size: usize, seed: u64) -> Self {
         let len = 1 << (2 * prefix_size);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let mut res: Vec<u32> = Vec::with_capacity(len);
         unsafe { res.set_len(len) };
         let bytes: &mut [u8] = bytemuck::cast_slice_mut(res.as_mut_slice());
         rng.fill_bytes(bytes);
+        let num_bits = (2 * suffix_size) as u32;
+        let num_bits_mask = u32::MAX >> (32 - 2*(num_bits));
+        for val in res.iter_mut() {
+            *val = *val & num_bits_mask;
+        }
         Self(res)
     }
 
