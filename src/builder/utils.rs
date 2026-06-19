@@ -31,12 +31,3 @@ pub fn packed_to_string(packed_bytes: u32, l: usize) -> String {
     }
     res
 }
-
-/// Fast on ARM only (`RBIT` instruction)
-pub fn min_by_reversed(a: u32, b: u32) -> u32 {
-    if a.reverse_bits() < b.reverse_bits() {
-        a
-    } else {
-        b
-    }
-}

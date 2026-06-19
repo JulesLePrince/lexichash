@@ -41,20 +41,6 @@ impl LexicSketch {
         }
     }
 
-    /// Get comparison vector between `self` and `sk`
-    pub fn compare(&self, sk: &Self) -> Vec<u32> {
-        let nb_masks = self.fingerprint.0.len();
-
-        // Be sure the two sketches have the same length
-        assert_eq!(nb_masks, sk.fingerprint.0.len());
-
-        let mut res:Vec<u32> = vec![0; nb_masks];
-        let xor_iterator = self.fingerprint.xor_chunks(&sk.fingerprint);
-
-        todo!();
-    }
-
-
     pub fn get_score(&self, sk: &Self) -> f64 {
         todo!();
     }
