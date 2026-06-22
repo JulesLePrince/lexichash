@@ -1,8 +1,8 @@
 use core::mem::transmute;
+use epserde::Epserde;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rand_xoshiro::rand_core::{Rng, SeedableRng};
 use wide::u32x8;
-use epserde::Epserde;
 
 #[derive(Epserde, Debug)]
 pub struct SketchSlice32(pub Vec<u32>);
@@ -20,10 +20,12 @@ impl SketchSlice32 {
         unsafe { res.set_len(len) };
         let bytes: &mut [u8] = bytemuck::cast_slice_mut(res.as_mut_slice());
         rng.fill_bytes(bytes);
-        let num_bits = (2 * suffix_size) as u32;
-        let num_bits_mask = u32::MAX >> (32 - 2*(num_bits));
-        for val in res.iter_mut() {
-            *val = *val & num_bits_mask;
+        let shift = u32::BITS.saturating_sub(2 * suffix_size as u32);
+        if shift > 0 {
+            let (chunks, _) = res.as_chunks_mut::<8>();
+            chunks.iter_mut().for_each(|chunk| {
+                *chunk = (u32x8::new(*chunk) >> shift).to_array();
+            });
         }
         Self(res)
     }
