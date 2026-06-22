@@ -107,7 +107,7 @@ pub fn leading_zeros_u32x8(x: u32x8) -> u32x8 {
 mod tests {
     use super::*;
 
-    use crate::builder::utils::kmer_to_ascii;
+    use crate::utils::kmer_to_ascii;
 
     #[test]
     fn leading_zeros_matches_scalar() {

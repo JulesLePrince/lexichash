@@ -1,4 +1,4 @@
-use super::utils::get_u64_unaligned;
+use crate::utils::get_u64_unaligned;
 use bytemuck::cast_slice;
 
 /// Iterate `packed_bytes` over factors of k `prefix_size`
@@ -53,7 +53,7 @@ impl<'a> Iterator for KmerIterator<'a> {
 mod tests {
     use super::*;
 
-    use crate::builder::utils::kmer_to_ascii;
+    use crate::utils::kmer_to_ascii;
     use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::FromSlice};
 
     const CONFIG: Config = ParserOptions::default()

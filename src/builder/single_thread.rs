@@ -1,7 +1,4 @@
-use crate::builder::utils;
-
 use super::iter::KmerIterator;
-use super::utils::*;
 
 /// Parameters for a sketch builder on one thread
 pub struct SingleThreadBuilder<'a> {
@@ -32,7 +29,7 @@ impl<'a> SingleThreadBuilder<'a> {
         let mut res: Vec<u32> = vec![u32::MAX; nb_masks];
         let mut prefix_iterator = self.get_prefix_iterator(packed_bytes);
         let mut suffix_iterator = self.get_suffix_iterator(packed_bytes);
-        suffix_iterator.nth(self.prefix_size-1);
+        suffix_iterator.nth(self.prefix_size - 1);
         while let Some(suffix) = suffix_iterator.next() {
             if let Some(prefix) = prefix_iterator.next() {
                 let suffix_mask = self.masks[prefix as usize];
