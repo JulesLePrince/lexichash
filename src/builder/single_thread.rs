@@ -16,20 +16,20 @@ impl<'a> SingleThreadBuilder<'a> {
         }
     }
 
+    #[inline(always)]
     pub fn get_prefix_iterator(&self, packed_bytes: &'a [u128]) -> KmerIterator<'a> {
         KmerIterator::new(self.prefix_size, packed_bytes)
     }
 
-    pub fn get_suffix_iterator(&self, packed_bytes: &'a [u128]) -> KmerIterator<'a> {
-        KmerIterator::new(self.suffix_size, packed_bytes)
+    #[inline(always)]
+    pub fn get_suffix_iterator(&self, packed_bytes: &'a [u128]) -> impl Iterator<Item = u32> {
+        KmerIterator::new(self.suffix_size, packed_bytes).skip(self.prefix_size)
     }
 
-    pub fn build(&self, packed_bytes: &'a [u128]) -> Vec<u32> {
-        let nb_masks = self.masks.len();
-        let mut res: Vec<u32> = vec![u32::MAX; nb_masks];
+    /// Build while reusing an existing sketch, to avoid new allocation and merge on-the-fly
+    pub fn build_with(&self, packed_bytes: &'a [u128], res: &'a mut [u32]) {
         let mut prefix_iterator = self.get_prefix_iterator(packed_bytes);
         let mut suffix_iterator = self.get_suffix_iterator(packed_bytes);
-        suffix_iterator.nth(self.prefix_size - 1);
         while let Some(suffix) = suffix_iterator.next() {
             if let Some(prefix) = prefix_iterator.next() {
                 let suffix_mask = self.masks[prefix as usize];
@@ -37,6 +37,5 @@ impl<'a> SingleThreadBuilder<'a> {
                 res[prefix as usize] = u32::min(res[prefix as usize], suffix_mask ^ suffix);
             }
         }
-        return res;
     }
 }

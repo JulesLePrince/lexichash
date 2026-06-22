@@ -8,24 +8,45 @@ pub struct SketchBuilder {
     k: usize,
     prefix_size: usize,
     threads: usize,
+    masks: SketchSlice32,
 }
 
 impl SketchBuilder {
     pub fn new(k: usize, prefix_size: usize, threads: usize) -> Self {
+        let suffix_size = k - prefix_size;
+        let masks = SketchSlice32::random(prefix_size, suffix_size, 101010);
+        Self::new_with_masks(k, prefix_size, threads, masks)
+    }
+
+    pub fn new_with_masks(
+        k: usize,
+        prefix_size: usize,
+        threads: usize,
+        masks: SketchSlice32,
+    ) -> Self {
         Self {
             k,
             prefix_size,
             threads,
+            masks,
         }
     }
 
-    pub fn build(&self, seq: &PackedDNA) -> LexicSketch {
+    pub fn build_with(&self, seq: &PackedDNA, res: &mut Vec<SketchSlice32>) {
+        let prefix_size = self.prefix_size;
         let suffix_size = self.k - self.prefix_size;
-        let masks = SketchSlice32::random(self.prefix_size, 2, 101010);
+        let missing_sketches = self.threads.saturating_sub(res.len());
+        if missing_sketches > 0 {
+            res.extend((0..missing_sketches).map(|_| SketchSlice32::new(prefix_size)));
+        }
+
         let (packed_bytes, _) = seq.bits();
         let single_thread_builder =
-            SingleThreadBuilder::new(self.prefix_size, suffix_size, &masks.0);
-        let fingerprint = single_thread_builder.build(packed_bytes);
-        LexicSketch::new(self.k, self.prefix_size, SketchSlice32(fingerprint))
+            SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
+        single_thread_builder.build_with(packed_bytes, &mut res[0].0);
+    }
+
+    pub fn merge_sketches(&self, sketches: &[SketchSlice32]) -> LexicSketch {
+        todo!()
     }
 }

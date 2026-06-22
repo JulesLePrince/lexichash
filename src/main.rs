@@ -1,10 +1,12 @@
 use clap::{Args, Parser, Subcommand};
-use epserde::ser::Serialize;
 use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::FromFile};
 use lexichash::{LexicSketch, SketchBuilder};
 use std::thread;
 
-const CONFIG: Config = ParserOptions::default().and_dna_packed().config();
+const CONFIG: Config = ParserOptions::default()
+    .ignore_headers()
+    .dna_packed()
+    .config();
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -71,22 +73,23 @@ fn main() {
             let mut parser =
                 FastxParser::<CONFIG>::from_file(&args.input).expect("Cannot open the file");
 
+            let mut sketches = Vec::new();
+
             // Iterate over records
-            if let Some(_event) = parser.next() {
-                // get a reference to the packed sequence
-                let seq = parser.get_dna_packed();
-                // Build the sketch and serialize it
-                let sketch = builder.build(&seq);
-                sketch.serialize(args.output);
+            while let Some(_) = parser.next() {
+                builder.build_with(parser.get_dna_packed(), &mut sketches);
             }
+            let sketch = builder.merge_sketches(&sketches);
+            sketch.serialize(&args.output);
         }
 
         // Compare two sketches
         Command::Compare(args) => {
             let sketch1 = LexicSketch::deserialize(args.sketch_1);
             let sketch2 = LexicSketch::deserialize(args.sketch_2);
-            let score = sketch1.get_score(&sketch2);
-            println!("The score between sketch 1 and sketch 2 is {}", score);
-        },
+            let score = sketch1.average_match_size(&sketch2);
+            // TODO estimate ANI from average match size
+            println!("The score between the two sketches is {}", score);
+        }
     }
 }
