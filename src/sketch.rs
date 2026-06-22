@@ -56,3 +56,40 @@ impl LexicSketch {
         todo!();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use core::hint::black_box;
+
+    #[test]
+    #[ignore = "This is a benchmark, not a test"]
+    fn bench_average_score() {
+        let prefix_size = 6;
+        let suffix_size = 16;
+        let k = prefix_size + suffix_size;
+        let rep = 1_000_000_000 >> (2 * prefix_size);
+
+        let sketch1 = LexicSketch::new(
+            k,
+            prefix_size,
+            SketchSlice32::random(prefix_size, suffix_size, 1),
+        );
+        let sketch2 = LexicSketch::new(
+            k,
+            prefix_size,
+            SketchSlice32::random(prefix_size, suffix_size, 2),
+        );
+
+        let start = std::time::Instant::now();
+        for _ in 0..rep {
+            let res = sketch1.average_match_size(&sketch2);
+            black_box(res);
+        }
+        eprintln!(
+            "Computation of average score: {:.03} Gbp/s",
+            start.elapsed().as_secs_f64().recip()
+        );
+    }
+}
