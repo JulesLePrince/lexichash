@@ -30,14 +30,31 @@ impl SketchSlice32 {
         Self(res)
     }
 
-    /// Lazily yields the element-wise XOR of `self` and `rhs`, 8 u32s at a time, without allocating.
-    pub fn xor_chunks<'a>(&'a self, rhs: &'a SketchSlice32) -> impl Iterator<Item = u32x8> + 'a {
-        assert_eq!(self.0.len(), rhs.0.len());
-        let (lhs, _) = self.0.as_chunks::<8>();
-        let (rhs, _) = rhs.0.as_chunks::<8>();
-        lhs.iter()
-            .zip(rhs)
-            .map(|(u, v)| u32x8::new(*u) ^ u32x8::new(*v))
+    /// Lazily yields 8 u32s at a time, without allocating.
+    #[inline(always)]
+    pub fn iter_chunks<'a>(&'a self) -> impl Iterator<Item = u32x8> + 'a {
+        self.0.as_chunks::<8>().0.iter().copied().map(u32x8::new)
+    }
+
+    #[inline(always)]
+    pub fn iter_leading_zeros<'a>(&'a self, rhs: &'a Self) -> impl Iterator<Item = u32x8> + 'a {
+        debug_assert_eq!(self.0.len(), rhs.0.len());
+        self.iter_chunks()
+            .zip(rhs.iter_chunks())
+            .map(|(u, v)| leading_zeros_u32x8(u ^ v))
+    }
+
+    /// Lazily yields the element-wise match size between `self` and `rhs`, 8 u32s at a time, without allocating.
+    pub fn iter_matches<'a>(
+        &'a self,
+        rhs: &'a Self,
+        prefix_size: usize,
+        suffix_size: usize,
+    ) -> impl Iterator<Item = u32x8> + 'a {
+        let offset = (prefix_size as u32).wrapping_sub(u32::BITS / 2 - suffix_size as u32);
+        let offsets = u32x8::new([offset; 8]);
+        self.iter_leading_zeros(rhs)
+            .map(move |lz| (lz >> 1) + offsets)
     }
 }
 
@@ -90,6 +107,8 @@ pub fn leading_zeros_u32x8(x: u32x8) -> u32x8 {
 mod tests {
     use super::*;
 
+    use crate::builder::utils::kmer_to_ascii;
+
     #[test]
     fn leading_zeros_matches_scalar() {
         let mut cases = vec![0u32, 1, 2, 3, u32::MAX, u32::MAX - 1, 0x80000000];
@@ -99,9 +118,47 @@ mod tests {
 
         for chunk in cases.chunks_exact(8) {
             let lanes: [u32; 8] = chunk.try_into().unwrap();
-            let got = leading_zeros_u32x8(u32x8::new(lanes)).to_array();
-            let want = lanes.map(u32::leading_zeros);
-            assert_eq!(got, want, "input = {lanes:?}");
+            let lz = leading_zeros_u32x8(u32x8::new(lanes)).to_array();
+            let expected = lanes.map(u32::leading_zeros);
+            assert_eq!(lz, expected, "input = {lanes:?}");
+        }
+    }
+
+    fn check_iter_matches(prefix_size: usize, suffix_size: usize, seed: u64) {
+        let sketch1 = SketchSlice32::random(prefix_size, suffix_size, seed + 1);
+        let sketch2 = SketchSlice32::random(prefix_size, suffix_size, seed + 2);
+        let (chunks1, _) = sketch1.0.as_chunks::<8>();
+        let (chunks2, _) = sketch2.0.as_chunks::<8>();
+        let mut buf1 = [0u8; 16];
+        let mut buf2 = [0u8; 16];
+
+        for (matches, (chunk1, chunk2)) in sketch1
+            .iter_matches(&sketch2, prefix_size, suffix_size)
+            .zip(chunks1.iter().zip(chunks2))
+        {
+            for ((&kmer1, &kmer2), &match_size) in chunk1.iter().zip(chunk2).zip(matches.as_array())
+            {
+                kmer_to_ascii(kmer1, suffix_size, &mut buf1);
+                kmer_to_ascii(kmer2, suffix_size, &mut buf2);
+                let common_suffix = buf1[..suffix_size]
+                    .iter()
+                    .rev()
+                    .zip(buf2[..suffix_size].iter().rev())
+                    .take_while(|(x, y)| x == y)
+                    .count();
+                let expected = (prefix_size + common_suffix) as u32;
+                assert_eq!(match_size, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_iter_matches() {
+        for prefix_size in 2..=7 {
+            for suffix_size in 1..=16 {
+                let seed = ((prefix_size * 16 + suffix_size - 1) * 2) as u64;
+                check_iter_matches(prefix_size, suffix_size, seed);
+            }
         }
     }
 }
