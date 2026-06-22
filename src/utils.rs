@@ -28,6 +28,12 @@ pub fn kmer_to_ascii(kmer: u32, k: usize, buf: &mut [u8]) {
     }
 }
 
+pub fn kmer_to_string(kmer: u32, k: usize) -> String {
+    let mut buf = [0u8; 32];
+    kmer_to_ascii(kmer, k, &mut buf);;
+    String::from_utf8(buf[..=(k-1)].to_vec()).expect("Invalid UTF-8 sequence")
+}
+
 /// Prints a 2-bit packed k-mer to stdout without allocating.
 pub fn print_kmer(kmer: u32, k: usize) {
     let mut buf = [0u8; 17];

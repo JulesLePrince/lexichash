@@ -1,4 +1,5 @@
-use super::iter::KmerIterator;
+use super::simd_iter::SimdKmerIterator;
+use wide::u32x8;
 
 /// Parameters for a sketch builder on one thread
 pub struct SingleThreadBuilder<'a> {
@@ -17,25 +18,44 @@ impl<'a> SingleThreadBuilder<'a> {
     }
 
     #[inline(always)]
-    pub fn get_prefix_iterator(&self, packed_bytes: &'a [u128]) -> KmerIterator<'a> {
-        KmerIterator::new(self.prefix_size, packed_bytes)
+    pub fn get_prefix_iterator(&self, packed_bytes: &'a [u128]) -> impl Iterator<Item = u32x8> {
+        SimdKmerIterator::new(self.prefix_size, packed_bytes, 0)
     }
 
     #[inline(always)]
-    pub fn get_suffix_iterator(&self, packed_bytes: &'a [u128]) -> impl Iterator<Item = u32> {
-        KmerIterator::new(self.suffix_size, packed_bytes).skip(self.prefix_size)
+    pub fn get_suffix_iterator(&self, packed_bytes: &'a [u128]) -> impl Iterator<Item = u32x8> {
+        SimdKmerIterator::new(self.suffix_size, packed_bytes, self.prefix_size)
     }
 
-    /// Build while reusing an existing sketch, to avoid new allocation and merge on-the-fly
     pub fn build_with(&self, packed_bytes: &'a [u128], res: &'a mut [u32]) {
-        let mut prefix_iterator = self.get_prefix_iterator(packed_bytes);
-        let mut suffix_iterator = self.get_suffix_iterator(packed_bytes);
-        while let Some(suffix) = suffix_iterator.next() {
-            if let Some(prefix) = prefix_iterator.next() {
-                let suffix_mask = self.masks[prefix as usize];
-                // The min can be used without bias (to stick to lexichash definition it should be reverse min)
-                res[prefix as usize] = u32::min(res[prefix as usize], suffix_mask ^ suffix);
+        let mut simd_prefix_iterator = self.get_prefix_iterator(packed_bytes);
+        let mut simd_suffix_iterator = self.get_suffix_iterator(packed_bytes);
+        // zip iterators together
+        let simd_iter = simd_prefix_iterator.by_ref().zip(simd_suffix_iterator.by_ref());
+        for (v_prefix, v_suffix) in simd_iter {
+            let prefixes = v_prefix.to_array();
+            let mut masks = [0u32; 8];
+            let mut currents = [0u32; 8];
+
+            // Current values
+            for i in 0..8 {
+                let p = prefixes[i] as usize;
+                masks[i] = self.masks[p];
+                currents[i] = res[p];
+            }
+
+            // Load into simd
+            let v_mask = u32x8::from(masks);
+            let v_current = u32x8::from(currents);
+
+            // Operations
+            let v_result = v_current.min(v_mask ^ v_suffix);
+            let results = v_result.to_array();
+
+            for i in 0..8 {
+                res[prefixes[i] as usize] = results[i];
             }
         }
+        // TODO : tail processing
     }
 }
