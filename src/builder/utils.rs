@@ -1,3 +1,5 @@
+use std::io::{Write, stdout};
+
 pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     // TODO: avoid bound checks, this is slow
 
@@ -13,21 +15,23 @@ pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     unsafe { core::ptr::read_unaligned(ptr) }
 }
 
-/// `l` is the number of bases and not bits
-pub fn packed_to_string(packed_bytes: u32, l: usize) -> String {
-    let mut tmp = packed_bytes;
-    let mut res = String::new();
-    for _ in 0..l {
-        let m: u32 = 0b11;
-        let c = match tmp & m {
-            0b00 => 'A',
-            0b01 => 'C',
-            0b10 => 'T',
-            0b11 => 'G',
-            _ => '_',
-        };
-        res.push(c);
-        tmp >>= 2;
+/// Decodes the `k` low bases of a 2-bit packed k-mer into `buf` as ASCII.
+pub fn kmer_to_ascii(kmer: u32, k: usize, buf: &mut [u8]) {
+    const BASES: [u8; 4] = *b"ACTG";
+    debug_assert!(k <= 16, "a u32 packs at most 16 bases");
+    debug_assert!(k <= buf.len(), "`buf` must hold at least `k` bytes");
+
+    let mut x = kmer;
+    for slot in &mut buf[..k] {
+        *slot = BASES[(x & 0b11) as usize];
+        x >>= 2;
     }
-    res
+}
+
+/// Prints a 2-bit packed k-mer to stdout without allocating.
+pub fn print_kmer(kmer: u32, k: usize) {
+    let mut buf = [0u8; 17];
+    kmer_to_ascii(kmer, k, &mut buf);
+    buf[k] = b'\n';
+    stdout().write_all(&buf[..k + 1]).unwrap();
 }

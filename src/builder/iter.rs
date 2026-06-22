@@ -1,27 +1,26 @@
 use super::utils::get_u64_unaligned;
 use bytemuck::cast_slice;
 
-
-/// Iterate `packed_bytes` over factors of size `prefix_size`
+/// Iterate `packed_bytes` over factors of k `prefix_size`
 pub struct KmerIterator<'a> {
-    packed_u32_bytes: &'a [u32],
+    packed_slice: &'a [u32],
+    k: usize,
     pos: usize,
-    size: usize,
     current_u64_window: u64,
     shift_inside_window: usize,
     filter_prefix_mask: u32,
 }
 
 impl<'a> KmerIterator<'a> {
-    pub fn new(size: usize, packed_bytes: &'a [u128]) -> Self {
-        let packed_u32_bytes = cast_slice(packed_bytes);
+    pub fn new(k: usize, packed_bytes: &'a [u128]) -> Self {
+        let packed_slice = cast_slice(packed_bytes);
         Self {
-            packed_u32_bytes: packed_u32_bytes,
+            packed_slice,
+            k,
             pos: 0,
-            size: size,
-            current_u64_window: get_u64_unaligned(packed_u32_bytes, 0),
+            current_u64_window: get_u64_unaligned(packed_slice, 0),
             shift_inside_window: 0,
-            filter_prefix_mask: u32::MAX >> (32 - 2 * size),
+            filter_prefix_mask: u32::MAX >> (32 - 2 * k),
         }
     }
 }
@@ -32,12 +31,12 @@ impl<'a> Iterator for KmerIterator<'a> {
         // If we reached the end of the current u64
         if self.shift_inside_window >= 32 {
             // End of the sequence
-            if self.pos == self.packed_u32_bytes.len() - 2 {
+            if self.pos == self.packed_slice.len() - 2 {
                 return None;
             }
 
             self.pos += 1;
-            self.current_u64_window = get_u64_unaligned(self.packed_u32_bytes, self.pos);
+            self.current_u64_window = get_u64_unaligned(self.packed_slice, self.pos);
             self.shift_inside_window = 0;
         }
 
@@ -48,35 +47,44 @@ impl<'a> Iterator for KmerIterator<'a> {
     }
 }
 
-
 // Tests
-
 
 #[cfg(test)]
 mod tests {
-    use helicase::{Config, ParserOptions, FastxParser, input::FromSlice, HelicaseParser, dna_format::PackedDNA};
-    use crate::builder::utils::packed_to_string;
     use super::*;
 
-    const CONFIG: Config = ParserOptions::default().and_dna_packed().config();
+    use crate::builder::utils::kmer_to_ascii;
+    use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::FromSlice};
+
+    const CONFIG: Config = ParserOptions::default()
+        .ignore_headers()
+        .dna_string()
+        .and_dna_packed()
+        .config();
+
+    fn check_kmer_iterator(fasta: &[u8], k: usize) {
+        let mut parser =
+            FastxParser::<CONFIG>::from_slice(fasta).expect("Failed to initialize parser");
+        let mut buf = vec![0; k];
+        while let Some(_) = parser.next() {
+            let ascii_bytes = parser.get_dna_string();
+            let (packed_bytes, _) = parser.get_dna_packed().bits();
+            let kmer_it = KmerIterator::new(k, packed_bytes);
+            ascii_bytes
+                .windows(k)
+                .zip(kmer_it)
+                .for_each(|(ascii, kmer)| {
+                    kmer_to_ascii(kmer, k, &mut buf);
+                    assert_eq!(ascii, &buf[..k])
+                });
+        }
+    }
 
     #[test]
     fn prefix_iterator() {
-        // Raw seq
-        let raw_seq: &[u8] = b">test_seq\nCCCTGAGTACGGAAAGCGCGAACGCAGATGCCCTATCGATACGTGGCAAGAGTGTTGTCCAAAGGGGCTACGCCCCTATTGAGTATTTACTATTGATTGTTAGATGTGAGTGCGTCTCAATCCTGCCGTTACTTGACCGTTTATGAGTTTATTATAGTCGTTAATATCTGGTCGAGACGGTGTAAAATACGCTATGCGACACCTGTCGTATATCAGAGAAAAGGGTCGATTCTCAATAAATATCGCCCTCTAAACCAGTTTAGGATGCTCTGGAGCCGAAGGATGGGTTCTTGCAGAATACATCACTTCTAGTAAGCGTCAGGCAAACGGCTTTAACCACCTTAGAAAGGGGCAATCACCCAAAGAATACAGTTGAGTAACGATTGTAAAAATAATGTAACAATGCATCAGTAGGAATCACCTTCACTTTCTTTGTATAGGAGTACGCACTCTTGTGGATACCCTCCGAACTACATACACGGTCCCAGTAACAGAGCT";
-
-        let mut parser = FastxParser::<CONFIG>::from_slice(raw_seq).expect("Failed to initialize parser");
-
-        // Unwrap the result
-        if let Some(_event) = parser.next() {
-            let seq = parser.get_dna_packed();
-            let (packed_bytes, _) = seq.bits();
-            let kmer_it = KmerIterator::new(1, packed_bytes);
-            for kmer in kmer_it {
-                // let kmer_str = packed_to_string(kmer, 20);
-                assert_eq!(kmer, 0);
-            }
+        let fasta: &[u8] = b">test_seq\nCCCTGAGTACGGAAAGCGCGAACGCAGATGCCCTATCGATACGTGGCAAGAGTGTTGTCCAAAGGGGCTACGCCCCTATTGAGTATTTACTATTGATTGTTAGATGTGAGTGCGTCTCAATCCTGCCGTTACTTGACCGTTTATGAGTTTATTATAGTCGTTAATATCTGGTCGAGACGGTGTAAAATACGCTATGCGACACCTGTCGTATATCAGAGAAAAGGGTCGATTCTCAATAAATATCGCCCTCTAAACCAGTTTAGGATGCTCTGGAGCCGAAGGATGGGTTCTTGCAGAATACATCACTTCTAGTAAGCGTCAGGCAAACGGCTTTAACCACCTTAGAAAGGGGCAATCACCCAAAGAATACAGTTGAGTAACGATTGTAAAAATAATGTAACAATGCATCAGTAGGAATCACCTTCACTTTCTTTGTATAGGAGTACGCACTCTTGTGGATACCCTCCGAACTACATACACGGTCCCAGTAACAGAGCT";
+        for k in 1..=16 {
+            check_kmer_iterator(fasta, k);
         }
-
     }
 }
