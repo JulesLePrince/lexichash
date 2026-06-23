@@ -41,18 +41,16 @@ impl SingleThreadBuilder {
     }
 
     pub fn build_with<const PREFETCH: bool>(&self, packed_bytes: &[u8], mask_res: &mut [u64]) {
-        let mut simd_prefix_iterator = self.get_prefix_iterator(packed_bytes);
-        let mut simd_suffix_iterator = self.get_suffix_iterator(packed_bytes);
-        // zip iterators together
-        let simd_iter = simd_prefix_iterator
-            .by_ref()
-            .zip(simd_suffix_iterator.by_ref());
+        assert_eq!(mask_res.len(), 1 << (2 * self.prefix_size));
 
         // Previous vars initialized to have 0 effects on first iteration
         let mut prev_prefixes: [u32; 8] = [0; 8];
         let mut prev_suffixes: [u32; 8] = [(mask_res[0] as u32) ^ u32::MAX; 8];
 
-        for (prefixes, suffixes) in simd_iter {
+        for (prefixes, suffixes) in self
+            .get_prefix_iterator(packed_bytes)
+            .zip(self.get_suffix_iterator(packed_bytes))
+        {
             // ------ Prefetch ------
             if PREFETCH {
                 prefixes.iter().map(|&p| p as usize).for_each(|p| {
@@ -65,7 +63,7 @@ impl SingleThreadBuilder {
             let mut prev_results = [0u32; 8];
 
             for i in 0..8 {
-                let c = mask_res[prev_prefixes[i] as usize];
+                let c = unsafe { *mask_res.get_unchecked(prev_prefixes[i] as usize) };
                 let mask = c as u32;
                 let best = (c >> 32) as u32;
                 prev_masks[i] = mask;
@@ -73,8 +71,10 @@ impl SingleThreadBuilder {
             }
 
             for i in 0..8 {
-                mask_res[prev_prefixes[i] as usize] =
-                    ((prev_results[i] as u64) << 32) | prev_masks[i] as u64;
+                unsafe {
+                    *mask_res.get_unchecked_mut(prev_prefixes[i] as usize) =
+                        ((prev_results[i] as u64) << 32) | prev_masks[i] as u64;
+                }
             }
 
             prev_prefixes = prefixes;
