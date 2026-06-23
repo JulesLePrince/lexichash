@@ -35,6 +35,39 @@ pub fn overlapping_chunks<T>(
     chunks
 }
 
+/// Get L1 data cache size in bytes.
+///
+/// Falls back to a conservative 32 KB when the platform cannot be queried.
+pub fn l1_cache_bytes() -> usize {
+    const FALLBACK: usize = 32 * 1024;
+
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let mut val: u64 = 0;
+        let mut size = core::mem::size_of::<u64>();
+        let rc = libc::sysctlbyname(
+            c"hw.l1dcachesize".as_ptr(),
+            &mut val as *mut u64 as *mut libc::c_void,
+            &mut size,
+            core::ptr::null_mut(),
+            0,
+        );
+        if rc == 0 && val > 0 {
+            return val as usize;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let v = libc::sysconf(libc::_SC_LEVEL1_DCACHE_SIZE);
+        if v > 0 {
+            return v as usize;
+        }
+    }
+
+    FALLBACK
+}
+
 pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     // TODO: avoid bound checks, this is slow
 

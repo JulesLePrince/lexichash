@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-branches = { version = "0.4.4", features = ["prefetch"] }
+branches = { version = "0.4", features = ["prefetch"] }
 bytemuck = "1.25"
 clap = { version = "4.6", features = ["derive"] }
 epserde = "0.12"
 helicase = "0.1"
+libc = "0.2"
 rand_xoshiro = "0.8"
 rayon = "1.12"
 smallvec = "1.15"
