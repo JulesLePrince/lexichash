@@ -68,6 +68,7 @@ pub fn l1_cache_bytes() -> usize {
     FALLBACK
 }
 
+/*
 pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     // TODO: avoid bound checks, this is slow
 
@@ -82,8 +83,10 @@ pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     // 3. Read it as a u64
     unsafe { core::ptr::read_unaligned(ptr) }
 }
+*/
 
 /// Decodes the `k` low bases of a 2-bit packed k-mer into `buf` as ASCII.
+#[allow(unused)]
 pub fn kmer_to_ascii(kmer: u32, k: usize, buf: &mut [u8]) {
     const BASES: [u8; 4] = *b"ACTG";
     debug_assert!(k <= 16, "a u32 packs at most 16 bases");
@@ -96,6 +99,7 @@ pub fn kmer_to_ascii(kmer: u32, k: usize, buf: &mut [u8]) {
     }
 }
 
+#[allow(unused)]
 pub fn kmer_to_string(kmer: u32, k: usize) -> String {
     let mut buf = [0u8; 32];
     kmer_to_ascii(kmer, k, &mut buf);
@@ -103,6 +107,7 @@ pub fn kmer_to_string(kmer: u32, k: usize) -> String {
 }
 
 /// Prints a 2-bit packed k-mer to stdout without allocating.
+#[allow(unused)]
 pub fn print_kmer(kmer: u32, k: usize) {
     let mut buf = [0u8; 17];
     kmer_to_ascii(kmer, k, &mut buf);
