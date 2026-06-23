@@ -4,7 +4,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rand_xoshiro::rand_core::{Rng, SeedableRng};
 use wide::u32x8;
 
-#[derive(Epserde, Debug)]
+#[derive(Epserde, Debug, Clone)]
 pub struct SketchSlice32(pub Vec<u32>);
 
 impl SketchSlice32 {
@@ -13,21 +13,31 @@ impl SketchSlice32 {
     }
 
     #[allow(clippy::uninit_vec)]
-    pub fn random(prefix_size: usize, suffix_size: usize, seed: u64) -> Self {
+    pub unsafe fn new_uninit(prefix_size: usize) -> Self {
         let len = 1 << (2 * prefix_size);
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let mut res: Vec<u32> = Vec::with_capacity(len);
         unsafe { res.set_len(len) };
-        let bytes: &mut [u8] = bytemuck::cast_slice_mut(res.as_mut_slice());
+        Self(res)
+    }
+
+    #[inline(always)]
+    pub fn clear(&mut self) {
+        self.0.fill(u32::MAX);
+    }
+
+    pub fn random(prefix_size: usize, suffix_size: usize, seed: u64) -> Self {
+        let mut res = unsafe { Self::new_uninit(prefix_size) };
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let bytes: &mut [u8] = bytemuck::cast_slice_mut(res.0.as_mut_slice());
         rng.fill_bytes(bytes);
         let shift = u32::BITS.saturating_sub(2 * suffix_size as u32);
         if shift > 0 {
-            let (chunks, _) = res.as_chunks_mut::<8>();
+            let (chunks, _) = res.0.as_chunks_mut::<8>();
             chunks.iter_mut().for_each(|chunk| {
                 *chunk = (u32x8::new(*chunk) >> shift).to_array();
             });
         }
-        Self(res)
+        res
     }
 
     /// Lazily yields 8 u32s at a time, without allocating.

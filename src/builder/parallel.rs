@@ -2,6 +2,7 @@ use super::single_thread::SingleThreadBuilder;
 use crate::LexicSketch;
 use crate::slice::SketchSlice32;
 use helicase::dna_format::PackedDNA;
+use wide::u32x8;
 
 /// The Sketch Builder Parameters
 pub struct SketchBuilder {
@@ -47,6 +48,16 @@ impl SketchBuilder {
     }
 
     pub fn merge_sketches(&self, sketches: &[SketchSlice32]) -> LexicSketch {
-        todo!()
+        let mut res = sketches[0].clone();
+        let (chunks, _) = res.0.as_chunks_mut::<8>();
+        sketches.iter().skip(1).for_each(|sketch| {
+            chunks
+                .iter_mut()
+                .zip(sketch.iter_chunks())
+                .for_each(|(chunk, v)| {
+                    *chunk = (u32x8::new(*chunk).min(v)).to_array();
+                })
+        });
+        LexicSketch::new(self.k, self.prefix_size, res)
     }
 }
