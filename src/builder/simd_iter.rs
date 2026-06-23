@@ -1,4 +1,3 @@
-use bytemuck::cast_slice;
 use wide::u32x8;
 
 /// Iterate `packed_bytes` over factors of k `prefix_size`
@@ -10,14 +9,13 @@ pub struct SimdKmerIterator<'a> {
 }
 
 impl<'a> SimdKmerIterator<'a> {
-    pub fn new(k: usize, packed_data: &'a [u128], initial_shift_bases: usize) -> Self {
-        let packed_bytes = cast_slice::<u128, u8>(packed_data);
+    pub fn new(k: usize, packed_bytes: &'a [u8], initial_shift_bases: usize) -> Self {
         let filter_prefix_mask = u32::MAX >> (32 - 2 * k);
         let filter_mask = u32x8::from([filter_prefix_mask; 8]);
         let pos_bytes = initial_shift_bases / 4;
         let bit_offset = ((initial_shift_bases % 4) * 2) as u32;
 
-        return Self {
+        Self {
             packed_bytes,
             pos_bytes,
             bit_offset,
@@ -38,15 +36,16 @@ impl<'a> Iterator for SimdKmerIterator<'a> {
             return None;
         }
 
-        // Create current u64 window
-        let window_bytes: [u8; 8] = self.packed_bytes[self.pos_bytes..self.pos_bytes + 8]
-            .try_into()
-            .unwrap();
-
-        let mut window = u64::from_le_bytes(window_bytes);
+        let mut window = unsafe {
+            self.packed_bytes
+                .as_ptr()
+                .add(self.pos_bytes)
+                .cast::<u64>()
+                .read_unaligned()
+        };
         window >>= self.bit_offset;
 
-        // Extrtact the 8 kmers
+        // Extract the 8 kmers
         let kmers = [
             (window >> 0) as u32,
             (window >> 2) as u32,
@@ -72,6 +71,7 @@ mod tests {
     use super::*;
 
     use crate::utils::kmer_to_ascii;
+    use bytemuck::cast_slice;
     use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::FromSlice};
 
     const CONFIG: Config = ParserOptions::default()
@@ -87,13 +87,14 @@ mod tests {
 
         while let Some(_) = parser.next() {
             let ascii_bytes = parser.get_dna_string();
-            let (packed_bytes, _) = parser.get_dna_packed().bits();
+            let (packed_data, _) = parser.get_dna_packed().bits();
+            let packed_bytes = cast_slice::<u128, u8>(packed_data);
             let mut kmer_it = SimdKmerIterator::new(k, packed_bytes, 0);
 
             let all_kmers: Vec<u32> = kmer_it
-                        .by_ref()
-                        .flat_map(|v_kmer| v_kmer.to_array())
-                        .collect();
+                .by_ref()
+                .flat_map(|v_kmer| v_kmer.to_array())
+                .collect();
 
             ascii_bytes
                 .windows(k)

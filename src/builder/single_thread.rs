@@ -1,6 +1,6 @@
 use super::simd_iter::SimdKmerIterator;
+use branches::{prefetch_read_data, prefetch_write_data};
 use wide::u32x8;
-use branches::{prefetch_write_data, prefetch_read_data};
 
 /// Parameters for a sketch builder on one thread
 pub struct SingleThreadBuilder<'a> {
@@ -19,20 +19,22 @@ impl<'a> SingleThreadBuilder<'a> {
     }
 
     #[inline(always)]
-    pub fn get_prefix_iterator(&self, packed_bytes: &'a [u128]) -> impl Iterator<Item = u32x8> {
+    pub fn get_prefix_iterator(&self, packed_bytes: &'a [u8]) -> impl Iterator<Item = u32x8> {
         SimdKmerIterator::new(self.prefix_size, packed_bytes, 0)
     }
 
     #[inline(always)]
-    pub fn get_suffix_iterator(&self, packed_bytes: &'a [u128]) -> impl Iterator<Item = u32x8> {
+    pub fn get_suffix_iterator(&self, packed_bytes: &'a [u8]) -> impl Iterator<Item = u32x8> {
         SimdKmerIterator::new(self.suffix_size, packed_bytes, self.prefix_size)
     }
 
-    pub fn build_with<const PREFETCH: bool>(&self, packed_bytes: &'a [u128], res: &'a mut [u32]) {
+    pub fn build_with<const PREFETCH: bool>(&self, packed_bytes: &'a [u8], res: &'a mut [u32]) {
         let mut simd_prefix_iterator = self.get_prefix_iterator(packed_bytes);
         let mut simd_suffix_iterator = self.get_suffix_iterator(packed_bytes);
         // zip iterators together
-        let simd_iter = simd_prefix_iterator.by_ref().zip(simd_suffix_iterator.by_ref());
+        let simd_iter = simd_prefix_iterator
+            .by_ref()
+            .zip(simd_suffix_iterator.by_ref());
 
         // Previous vars initialized to have 0 effects on first iteration
         let mut prev_prefixes: [u32; 8] = [0; 8];
@@ -42,11 +44,10 @@ impl<'a> SingleThreadBuilder<'a> {
             let prefixes = v_prefix.to_array();
             // ------ Prefetch ------
             if PREFETCH {
-                for i in 0..8 {
-                    let p = prefixes[i] as usize;
-                    prefetch_write_data::<_, 0>(&res[p]);
+                prefixes.iter().map(|&p| p as usize).for_each(|p| {
                     prefetch_read_data::<_, 0>(&self.masks[p]);
-                }
+                    prefetch_write_data::<_, 0>(&res[p]);
+                });
             }
 
             // ------ Calculations ------

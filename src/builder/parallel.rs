@@ -1,6 +1,7 @@
 use super::single_thread::SingleThreadBuilder;
 use crate::LexicSketch;
 use crate::slice::SketchSlice32;
+use bytemuck::cast_slice;
 use helicase::dna_format::PackedDNA;
 use wide::u32x8;
 
@@ -41,7 +42,8 @@ impl SketchBuilder {
             res.extend((0..missing_sketches).map(|_| SketchSlice32::new(prefix_size)));
         }
 
-        let (packed_bytes, _) = seq.bits();
+        let (packed_data, tail) = seq.bits();
+        let packed_bytes = cast_slice::<u128, u8>(packed_data);
         let single_thread_builder =
             SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
         single_thread_builder.build_with::<true>(packed_bytes, &mut res[0].0);
