@@ -43,6 +43,46 @@ impl SketchBuilder {
         }
     }
 
+    pub fn build_with_advanced<const PAR: bool, const PREFETCH: bool>(
+        &self,
+        seq: &PackedDNA,
+        res: &mut Vec<SketchSlice32>,
+    ) {
+        let prefix_size = self.prefix_size;
+        let suffix_size = self.k - self.prefix_size;
+        let (packed_data, tail) = seq.bits();
+        let packed_bytes = cast_slice::<u128, u8>(packed_data);
+
+        if PAR {
+            let missing_sketches = self.threads.saturating_sub(res.len());
+            if missing_sketches > 0 {
+                res.extend((0..missing_sketches).map(|_| SketchSlice32::new(prefix_size)));
+            }
+
+            let overlap = self.k.saturating_sub(1).div_ceil(4);
+            let slices = overlapping_chunks(packed_bytes, self.threads, overlap);
+
+            self.thread_pool.install(|| {
+                slices
+                    .into_par_iter()
+                    .zip(res.par_iter_mut())
+                    .for_each(|(&packed_bytes, res)| {
+                        let builder =
+                            SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
+                        builder.build_with::<PREFETCH>(packed_bytes, &mut res.0);
+                    });
+            });
+        } else {
+            if res.is_empty() {
+                res.push(SketchSlice32::new(prefix_size));
+            }
+            let builder = SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
+            builder.build_with::<PREFETCH>(packed_bytes, &mut res[0].0);
+        }
+
+        // TODO tail processing
+    }
+
     pub fn build_with(&self, seq: &PackedDNA, res: &mut Vec<SketchSlice32>) {
         let prefix_size = self.prefix_size;
         let suffix_size = self.k - self.prefix_size;

@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::FromFile};
+use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::*};
 use lexichash::{LexicSketch, SketchBuilder};
 use std::thread;
 
@@ -71,13 +71,15 @@ fn main() {
 
             // Create a parser with the desired options
             let mut parser =
-                FastxParser::<CONFIG>::from_file(&args.input).expect("Cannot open the file");
+                FastxParser::<CONFIG>::from_file_mmap(&args.input).expect("Cannot open the file");
 
             let mut sketches = Vec::new();
 
             // Iterate over records
             while let Some(_) = parser.next() {
-                builder.build_with(parser.get_dna_packed(), &mut sketches);
+                // builder.build_with(parser.get_dna_packed(), &mut sketches);
+                // builder.build_with_advanced::<false, false>(parser.get_dna_packed(), &mut sketches);
+                builder.build_with_advanced::<false, true>(parser.get_dna_packed(), &mut sketches);
             }
             let sketch = builder.merge_sketches(&sketches);
             sketch.serialize(&args.output);
