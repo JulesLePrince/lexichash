@@ -1,4 +1,39 @@
+use smallvec::SmallVec;
 use std::io::{Write, stdout};
+
+/// Number of chunk references kept inline before spilling to the heap.
+const INLINE_CHUNKS: usize = 16;
+
+/// Splits `slice` into `num_chunks` contiguous subslices that each overlap the next one by `overlap` elements.
+///
+/// The slice is first evenly partitioned into `num_chunks` segments (the remainder is spread across the leading segments).
+/// Every segment except the last is then extended by `overlap` elements into its successor, so consecutive subslices share `overlap` elements.
+pub fn overlapping_chunks<T>(
+    slice: &[T],
+    num_chunks: usize,
+    overlap: usize,
+) -> SmallVec<[&[T]; INLINE_CHUNKS]> {
+    let mut chunks = SmallVec::new();
+    if num_chunks == 0 {
+        return chunks;
+    }
+
+    let len = slice.len();
+    let base = len / num_chunks;
+    let rem = len % num_chunks;
+
+    // Boundary of the non-overlapping partition that precedes chunk `i`,
+    // distributing the `rem` leftover elements over the first `rem` chunks.
+    let boundary = |i: usize| i * base + i.min(rem);
+
+    for i in 0..num_chunks {
+        let start = boundary(i);
+        let end = (boundary(i + 1) + overlap).min(len);
+        chunks.push(&slice[start..end]);
+    }
+
+    chunks
+}
 
 pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
     // TODO: avoid bound checks, this is slow
@@ -31,7 +66,7 @@ pub fn kmer_to_ascii(kmer: u32, k: usize, buf: &mut [u8]) {
 pub fn kmer_to_string(kmer: u32, k: usize) -> String {
     let mut buf = [0u8; 32];
     kmer_to_ascii(kmer, k, &mut buf);
-    String::from_utf8(buf[..=(k-1)].to_vec()).expect("Invalid UTF-8 sequence")
+    String::from_utf8(buf[..k].to_vec()).expect("Invalid UTF-8 sequence")
 }
 
 /// Prints a 2-bit packed k-mer to stdout without allocating.
@@ -40,4 +75,42 @@ pub fn print_kmer(kmer: u32, k: usize) {
     kmer_to_ascii(kmer, k, &mut buf);
     buf[k] = b'\n';
     stdout().write_all(&buf[..k + 1]).unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunks_cover_and_overlap() {
+        let data: Vec<u32> = (0..10).collect();
+        let chunks = overlapping_chunks(&data, 3, 2);
+
+        // 10 elements over 3 chunks -> base 3, remainder 1 on the first chunk.
+        // Boundaries: 0, 4, 7, 10. Each chunk extends 2 past its boundary.
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], &[0, 1, 2, 3, 4, 5]); // [0..4) + 2
+        assert_eq!(chunks[1], &[4, 5, 6, 7, 8]); // [4..7) + 2
+        assert_eq!(chunks[2], &[7, 8, 9]); // [7..10), clamped
+
+        // Consecutive chunks share exactly `overlap` elements where not clamped.
+        assert_eq!(&chunks[0][chunks[0].len() - 2..], &chunks[1][..2]);
+        assert_eq!(&chunks[1][chunks[1].len() - 2..], &chunks[2][..2]);
+    }
+
+    #[test]
+    fn no_overlap_partitions_exactly() {
+        let data: Vec<u32> = (0..9).collect();
+        let chunks = overlapping_chunks(&data, 3, 0);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], &[0, 1, 2]);
+        assert_eq!(chunks[1], &[3, 4, 5]);
+        assert_eq!(chunks[2], &[6, 7, 8]);
+    }
+
+    #[test]
+    fn zero_chunks_is_empty() {
+        let data = [1, 2, 3];
+        assert!(overlapping_chunks(&data, 0, 1).is_empty());
+    }
 }

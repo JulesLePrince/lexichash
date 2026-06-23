@@ -11,6 +11,7 @@ epserde = "0.12"
 helicase = "0.1"
 rand_xoshiro = "0.8"
 rayon = "1.12"
+smallvec = "1.15"
 wide = "1.5"
 
 [profile.release]
