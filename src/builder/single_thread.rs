@@ -28,6 +28,15 @@ impl<'a> SingleThreadBuilder<'a> {
         SimdKmerIterator::new(self.suffix_size, packed_bytes, self.prefix_size)
     }
 
+    #[inline(always)]
+    pub fn build_with_dyn(&self, packed_bytes: &'a [u8], res: &'a mut [u32], prefetch: bool) {
+        if prefetch {
+            self.build_with::<true>(packed_bytes, res);
+        } else {
+            self.build_with::<false>(packed_bytes, res);
+        }
+    }
+
     pub fn build_with<const PREFETCH: bool>(&self, packed_bytes: &'a [u8], res: &'a mut [u32]) {
         let mut simd_prefix_iterator = self.get_prefix_iterator(packed_bytes);
         let mut simd_suffix_iterator = self.get_suffix_iterator(packed_bytes);

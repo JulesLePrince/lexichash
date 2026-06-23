@@ -1,7 +1,7 @@
 use super::single_thread::SingleThreadBuilder;
 use crate::LexicSketch;
 use crate::slice::SketchSlice32;
-use crate::utils::overlapping_chunks;
+use crate::utils::{l1_cache_bytes, overlapping_chunks};
 use bytemuck::cast_slice;
 use helicase::dna_format::PackedDNA;
 use rayon::prelude::*;
@@ -15,6 +15,7 @@ pub struct SketchBuilder {
     threads: usize,
     masks: SketchSlice32,
     thread_pool: ThreadPool,
+    prefetch: bool,
 }
 
 impl SketchBuilder {
@@ -34,13 +35,21 @@ impl SketchBuilder {
             .num_threads(threads)
             .build()
             .expect("Failed to build thread pool");
+        let table_bytes = (1usize << (2 * prefix_size)) * core::mem::size_of::<u32>();
+        let prefetch = 2 * table_bytes > l1_cache_bytes();
         Self {
             k,
             prefix_size,
             threads,
             masks,
             thread_pool,
+            prefetch,
         }
+    }
+
+    #[inline(always)]
+    pub fn build_with(&self, seq: &PackedDNA, res: &mut Vec<SketchSlice32>) {
+        self.build_with_advanced::<true, true>(seq, res);
     }
 
     pub fn build_with_advanced<const PAR: bool, const PREFETCH: bool>(
@@ -50,6 +59,7 @@ impl SketchBuilder {
     ) {
         let prefix_size = self.prefix_size;
         let suffix_size = self.k - self.prefix_size;
+        let prefetch = PREFETCH && self.prefetch;
         let (packed_data, tail) = seq.bits();
         let packed_bytes = cast_slice::<u128, u8>(packed_data);
 
@@ -69,7 +79,7 @@ impl SketchBuilder {
                     .for_each(|(&packed_bytes, res)| {
                         let builder =
                             SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
-                        builder.build_with::<PREFETCH>(packed_bytes, &mut res.0);
+                        builder.build_with_dyn(packed_bytes, &mut res.0, prefetch);
                     });
             });
         } else {
@@ -77,34 +87,8 @@ impl SketchBuilder {
                 res.push(SketchSlice32::new(prefix_size));
             }
             let builder = SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
-            builder.build_with::<PREFETCH>(packed_bytes, &mut res[0].0);
+            builder.build_with_dyn(packed_bytes, &mut res[0].0, prefetch);
         }
-
-        // TODO tail processing
-    }
-
-    pub fn build_with(&self, seq: &PackedDNA, res: &mut Vec<SketchSlice32>) {
-        let prefix_size = self.prefix_size;
-        let suffix_size = self.k - self.prefix_size;
-        let missing_sketches = self.threads.saturating_sub(res.len());
-        if missing_sketches > 0 {
-            res.extend((0..missing_sketches).map(|_| SketchSlice32::new(prefix_size)));
-        }
-
-        let (packed_data, tail) = seq.bits();
-        let packed_bytes = cast_slice::<u128, u8>(packed_data);
-        let overlap = self.k.saturating_sub(1).div_ceil(4);
-        let slices = overlapping_chunks(packed_bytes, self.threads, overlap);
-
-        self.thread_pool.install(|| {
-            slices
-                .into_par_iter()
-                .zip(res.par_iter_mut())
-                .for_each(|(&packed_bytes, res)| {
-                    let builder = SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
-                    builder.build_with::<true>(packed_bytes, &mut res.0);
-                });
-        });
 
         // TODO tail processing
     }
