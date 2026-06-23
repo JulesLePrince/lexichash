@@ -1,3 +1,4 @@
+use super::interleaved::InterleavedSlice32;
 use super::single_thread::SingleThreadBuilder;
 use crate::LexicSketch;
 use crate::slice::SketchSlice32;
@@ -6,7 +7,6 @@ use bytemuck::cast_slice;
 use helicase::dna_format::PackedDNA;
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use wide::u32x8;
 
 /// The Sketch Builder Parameters
 pub struct SketchBuilder {
@@ -48,14 +48,14 @@ impl SketchBuilder {
     }
 
     #[inline(always)]
-    pub fn build_with(&self, seq: &PackedDNA, res: &mut Vec<SketchSlice32>) {
+    pub fn build_with(&self, seq: &PackedDNA, res: &mut Vec<InterleavedSlice32>) {
         self.build_with_advanced::<true, true>(seq, res);
     }
 
     pub fn build_with_advanced<const PAR: bool, const PREFETCH: bool>(
         &self,
         seq: &PackedDNA,
-        res: &mut Vec<SketchSlice32>,
+        res: &mut Vec<InterleavedSlice32>,
     ) {
         let prefix_size = self.prefix_size;
         let suffix_size = self.k - self.prefix_size;
@@ -66,7 +66,9 @@ impl SketchBuilder {
         if PAR {
             let missing_sketches = self.threads.saturating_sub(res.len());
             if missing_sketches > 0 {
-                res.extend((0..missing_sketches).map(|_| SketchSlice32::new(prefix_size)));
+                res.extend(
+                    (0..missing_sketches).map(|_| InterleavedSlice32::from_masks(&self.masks)),
+                );
             }
 
             let overlap = self.k.saturating_sub(1).div_ceil(4);
@@ -77,32 +79,28 @@ impl SketchBuilder {
                     .into_par_iter()
                     .zip(res.par_iter_mut())
                     .for_each(|(&packed_bytes, res)| {
-                        let builder =
-                            SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
+                        let builder = SingleThreadBuilder::new(prefix_size, suffix_size);
                         builder.build_with_dyn(packed_bytes, &mut res.0, prefetch);
                     });
             });
         } else {
             if res.is_empty() {
-                res.push(SketchSlice32::new(prefix_size));
+                res.push(InterleavedSlice32::from_masks(&self.masks));
             }
-            let builder = SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
+            let builder = SingleThreadBuilder::new(prefix_size, suffix_size);
             builder.build_with_dyn(packed_bytes, &mut res[0].0, prefetch);
         }
 
         // TODO tail processing
     }
 
-    pub fn merge_sketches(&self, sketches: &[SketchSlice32]) -> LexicSketch {
-        let mut res = sketches[0].clone();
-        let (chunks, _) = res.0.as_chunks_mut::<8>();
+    pub fn merge_sketches(&self, sketches: &[InterleavedSlice32]) -> LexicSketch {
+        let mut res = sketches[0].deinterleave();
         sketches.iter().skip(1).for_each(|sketch| {
-            chunks
+            res.0
                 .iter_mut()
-                .zip(sketch.iter_chunks())
-                .for_each(|(chunk, v)| {
-                    *chunk = (u32x8::new(*chunk).min(v)).to_array();
-                })
+                .zip(sketch.0.iter())
+                .for_each(|(r, &c)| *r = (*r).min((c >> 32) as u32));
         });
         LexicSketch::new(self.k, self.prefix_size, res)
     }

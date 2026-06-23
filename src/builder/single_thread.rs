@@ -1,43 +1,46 @@
-use super::simd_iter::SimdKmerIterator;
-use branches::{prefetch_read_data, prefetch_write_data};
-use wide::u32x8;
+use super::batched_iter::BatchedKmerIterator;
+use branches::prefetch_write_data;
 
 /// Parameters for a sketch builder on one thread
-pub struct SingleThreadBuilder<'a> {
+pub struct SingleThreadBuilder {
     prefix_size: usize,
     suffix_size: usize,
-    masks: &'a [u32],
 }
 
-impl<'a> SingleThreadBuilder<'a> {
-    pub fn new(prefix_size: usize, suffix_size: usize, masks: &'a [u32]) -> Self {
+impl SingleThreadBuilder {
+    pub fn new(prefix_size: usize, suffix_size: usize) -> Self {
         Self {
             prefix_size,
             suffix_size,
-            masks,
         }
     }
 
     #[inline(always)]
-    pub fn get_prefix_iterator(&self, packed_bytes: &'a [u8]) -> impl Iterator<Item = u32x8> {
-        SimdKmerIterator::new(self.prefix_size, packed_bytes, 0)
+    pub fn get_prefix_iterator<'a>(
+        &self,
+        packed_bytes: &'a [u8],
+    ) -> impl Iterator<Item = [u32; 8]> + 'a {
+        BatchedKmerIterator::new(self.prefix_size, packed_bytes, 0)
     }
 
     #[inline(always)]
-    pub fn get_suffix_iterator(&self, packed_bytes: &'a [u8]) -> impl Iterator<Item = u32x8> {
-        SimdKmerIterator::new(self.suffix_size, packed_bytes, self.prefix_size)
+    pub fn get_suffix_iterator<'a>(
+        &self,
+        packed_bytes: &'a [u8],
+    ) -> impl Iterator<Item = [u32; 8]> + 'a {
+        BatchedKmerIterator::new(self.suffix_size, packed_bytes, self.prefix_size)
     }
 
     #[inline(always)]
-    pub fn build_with_dyn(&self, packed_bytes: &'a [u8], res: &'a mut [u32], prefetch: bool) {
+    pub fn build_with_dyn(&self, packed_bytes: &[u8], mask_res: &mut [u64], prefetch: bool) {
         if prefetch {
-            self.build_with::<true>(packed_bytes, res);
+            self.build_with::<true>(packed_bytes, mask_res);
         } else {
-            self.build_with::<false>(packed_bytes, res);
+            self.build_with::<false>(packed_bytes, mask_res);
         }
     }
 
-    pub fn build_with<const PREFETCH: bool>(&self, packed_bytes: &'a [u8], res: &'a mut [u32]) {
+    pub fn build_with<const PREFETCH: bool>(&self, packed_bytes: &[u8], mask_res: &mut [u64]) {
         let mut simd_prefix_iterator = self.get_prefix_iterator(packed_bytes);
         let mut simd_suffix_iterator = self.get_suffix_iterator(packed_bytes);
         // zip iterators together
@@ -47,42 +50,35 @@ impl<'a> SingleThreadBuilder<'a> {
 
         // Previous vars initialized to have 0 effects on first iteration
         let mut prev_prefixes: [u32; 8] = [0; 8];
-        let mut v_prev_suffix: u32x8 = u32x8::from([self.masks[0] ^ u32::MAX; 8]);
+        let mut prev_suffixes: [u32; 8] = [(mask_res[0] as u32) ^ u32::MAX; 8];
 
-        for (v_prefix, v_suffix) in simd_iter {
-            let prefixes = v_prefix.to_array();
+        for (prefixes, suffixes) in simd_iter {
             // ------ Prefetch ------
             if PREFETCH {
                 prefixes.iter().map(|&p| p as usize).for_each(|p| {
-                    prefetch_read_data::<_, 0>(&self.masks[p]);
-                    prefetch_write_data::<_, 0>(&res[p]);
+                    prefetch_write_data::<_, 0>(&mask_res[p]);
                 });
             }
 
             // ------ Calculations ------
             let mut prev_masks = [0u32; 8];
-            let mut prev_currents = [0u32; 8];
+            let mut prev_results = [0u32; 8];
 
             for i in 0..8 {
-                let prev_p = prev_prefixes[i] as usize;
-                prev_masks[i] = self.masks[prev_p];
-                prev_currents[i] = res[prev_p];
+                let c = mask_res[prev_prefixes[i] as usize];
+                let mask = c as u32;
+                let best = (c >> 32) as u32;
+                prev_masks[i] = mask;
+                prev_results[i] = best.min(mask ^ prev_suffixes[i]);
             }
 
-            // Load into simd
-            let v_prev_masks = u32x8::from(prev_masks);
-            let v_prev_current = u32x8::from(prev_currents);
-
-            // Operations
-            let v_prev_result = v_prev_current.min(v_prev_masks ^ v_prev_suffix);
-            let prev_results = v_prev_result.to_array();
-
             for i in 0..8 {
-                res[prev_prefixes[i] as usize] = prev_results[i];
+                mask_res[prev_prefixes[i] as usize] =
+                    ((prev_results[i] as u64) << 32) | prev_masks[i] as u64;
             }
 
             prev_prefixes = prefixes;
-            v_prev_suffix = v_suffix;
+            prev_suffixes = suffixes;
         }
         // TODO : tail processing
     }
