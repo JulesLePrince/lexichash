@@ -44,7 +44,7 @@ impl SketchBuilder {
         let (packed_bytes, _) = seq.bits();
         let single_thread_builder =
             SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
-        single_thread_builder.build_with(packed_bytes, &mut res[0].0);
+        single_thread_builder.build_with::<true>(packed_bytes, &mut res[0].0);
     }
 
     pub fn merge_sketches(&self, sketches: &[SketchSlice32]) -> LexicSketch {

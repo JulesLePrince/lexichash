@@ -58,8 +58,6 @@ impl<'a> Iterator for SimdKmerIterator<'a> {
             (window >> 14) as u32,
         ];
 
-
-
         let v_kmers = u32x8::from(kmers);
         let result = v_kmers & self.filter_mask;
 
