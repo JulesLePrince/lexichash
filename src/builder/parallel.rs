@@ -1,8 +1,11 @@
 use super::single_thread::SingleThreadBuilder;
 use crate::LexicSketch;
 use crate::slice::SketchSlice32;
+use crate::utils::overlapping_chunks;
 use bytemuck::cast_slice;
 use helicase::dna_format::PackedDNA;
+use rayon::prelude::*;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use wide::u32x8;
 
 /// The Sketch Builder Parameters
@@ -11,6 +14,7 @@ pub struct SketchBuilder {
     prefix_size: usize,
     threads: usize,
     masks: SketchSlice32,
+    thread_pool: ThreadPool,
 }
 
 impl SketchBuilder {
@@ -26,11 +30,16 @@ impl SketchBuilder {
         threads: usize,
         masks: SketchSlice32,
     ) -> Self {
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .expect("Failed to build thread pool");
         Self {
             k,
             prefix_size,
             threads,
             masks,
+            thread_pool,
         }
     }
 
@@ -44,9 +53,20 @@ impl SketchBuilder {
 
         let (packed_data, tail) = seq.bits();
         let packed_bytes = cast_slice::<u128, u8>(packed_data);
-        let single_thread_builder =
-            SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
-        single_thread_builder.build_with::<true>(packed_bytes, &mut res[0].0);
+        let overlap = self.k.saturating_sub(1).div_ceil(4);
+        let slices = overlapping_chunks(packed_bytes, self.threads, overlap);
+
+        self.thread_pool.install(|| {
+            slices
+                .into_par_iter()
+                .zip(res.par_iter_mut())
+                .for_each(|(&packed_bytes, res)| {
+                    let builder = SingleThreadBuilder::new(prefix_size, suffix_size, &self.masks.0);
+                    builder.build_with::<true>(packed_bytes, &mut res.0);
+                });
+        });
+
+        // TODO tail processing
     }
 
     pub fn merge_sketches(&self, sketches: &[SketchSlice32]) -> LexicSketch {
