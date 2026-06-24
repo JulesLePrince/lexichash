@@ -79,7 +79,7 @@ fn main() {
             while let Some(_) = parser.next() {
                 // builder.build_with(parser.get_dna_packed(), &mut sketches);
                 // builder.build_with_advanced::<false, false>(parser.get_dna_packed(), &mut sketches);
-                builder.build_with_advanced::<false, true>(parser.get_dna_packed(), &mut sketches);
+                builder.build_with_advanced::<true, false>(parser.get_dna_packed(), &mut sketches);
             }
             let sketch = builder.merge_sketches(&sketches);
             sketch.serialize(&args.output);
