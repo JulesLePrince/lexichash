@@ -1,5 +1,6 @@
 use super::batched_iter::BatchedKmerIterator;
 use branches::prefetch_write_data;
+use wide::u32x8;
 
 /// Parameters for a sketch builder on one thread
 pub struct SingleThreadBuilder {
@@ -33,14 +34,19 @@ impl SingleThreadBuilder {
 
     #[inline(always)]
     pub fn build_with_dyn(&self, packed_bytes: &[u8], mask_res: &mut [u64], prefetch: bool) {
+        const VECT: bool = cfg!(target_feature = "avx2");
         if prefetch {
-            self.build_with::<true>(packed_bytes, mask_res);
+            self.build_with::<true, VECT>(packed_bytes, mask_res);
         } else {
-            self.build_with::<false>(packed_bytes, mask_res);
+            self.build_with::<false, VECT>(packed_bytes, mask_res);
         }
     }
 
-    pub fn build_with<const PREFETCH: bool>(&self, packed_bytes: &[u8], mask_res: &mut [u64]) {
+    pub fn build_with<const PREFETCH: bool, const VECT: bool>(
+        &self,
+        packed_bytes: &[u8],
+        mask_res: &mut [u64],
+    ) {
         assert_eq!(mask_res.len(), 1 << (2 * self.prefix_size));
 
         // Previous vars initialized to have 0 effects on first iteration
@@ -59,27 +65,50 @@ impl SingleThreadBuilder {
             }
 
             // ------ Calculations ------
-            let mut prev_masks = [0u32; 8];
-            let mut prev_results = [0u32; 8];
-
-            for i in 0..8 {
-                let c = unsafe { *mask_res.get_unchecked(prev_prefixes[i] as usize) };
-                let mask = c as u32;
-                let best = (c >> 32) as u32;
-                prev_masks[i] = mask;
-                prev_results[i] = best.min(mask ^ prev_suffixes[i]);
-            }
-
-            for i in 0..8 {
-                unsafe {
-                    *mask_res.get_unchecked_mut(prev_prefixes[i] as usize) =
-                        ((prev_results[i] as u64) << 32) | prev_masks[i] as u64;
-                }
-            }
+            Self::process_batch::<VECT>(mask_res, &prev_prefixes, &prev_suffixes);
 
             prev_prefixes = prefixes;
             prev_suffixes = suffixes;
         }
         // TODO : tail processing
+    }
+
+    /// Gather the 8 buckets addressed by `prefixes`, update each running best with
+    /// `best.min(mask ^ suffix)`, and scatter the results back.
+    ///
+    /// With `VECT` the per-lane `xor`/`min` is vectorized, otherwise it stays scalar.
+    /// Vectorizing only paid off on AVX2.
+    #[inline(always)]
+    fn process_batch<const VECT: bool>(
+        mask_res: &mut [u64],
+        prefixes: &[u32; 8],
+        suffixes: &[u32; 8],
+    ) {
+        let mut masks = [0u32; 8];
+        let mut bests = [0u32; 8];
+        for i in 0..8 {
+            let c = unsafe { *mask_res.get_unchecked(prefixes[i] as usize) };
+            masks[i] = c as u32;
+            bests[i] = (c >> 32) as u32;
+        }
+
+        let results = if VECT {
+            u32x8::new(bests)
+                .min(u32x8::new(masks) ^ u32x8::new(*suffixes))
+                .to_array()
+        } else {
+            let mut results = [0u32; 8];
+            for i in 0..8 {
+                results[i] = bests[i].min(masks[i] ^ suffixes[i]);
+            }
+            results
+        };
+
+        for i in 0..8 {
+            unsafe {
+                *mask_res.get_unchecked_mut(prefixes[i] as usize) =
+                    ((results[i] as u64) << 32) | masks[i] as u64;
+            }
+        }
     }
 }
