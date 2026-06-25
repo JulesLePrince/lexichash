@@ -114,7 +114,7 @@ impl SketchBuilder {
             let suffix = (first_window as u64 >> (2 * self.prefix_size)) & suffix_mask;
             let s: u64 = (res[0].0[prefix as usize] >> 32) ^ suffix; // score of current kmer
             let best: u64 = u64::min(res[0].0[prefix as usize] >> 32, s);
-            res[0].0[prefix as usize] = ((res[0].0[prefix as usize] << 32) >> 32) | (best << 32) ;
+            res[0].write_res(prefix as usize, best as u32);
             // rolling
             first_window = (first_window >> 2) | (((second_window & 0b11) as u128) << 126);
             second_window >>= 2;
