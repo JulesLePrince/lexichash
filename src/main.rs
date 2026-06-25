@@ -6,6 +6,8 @@ use std::thread;
 const CONFIG: Config = ParserOptions::default()
     .ignore_headers()
     .dna_packed()
+    .split_non_actg()
+    .return_record(false)
     .config();
 
 #[derive(Parser, Debug)]
@@ -76,7 +78,7 @@ fn main() {
             let mut sketches = Vec::new();
 
             // Iterate over records
-            while let Some(_) = parser.next() {
+            while let Some(event) = parser.next() {
                 // builder.build_with(parser.get_dna_packed(), &mut sketches);
                 // builder.build_with_advanced::<false, false>(parser.get_dna_packed(), &mut sketches);
                 builder.build_with_advanced::<true, false>(parser.get_dna_packed(), &mut sketches);
