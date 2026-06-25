@@ -70,7 +70,6 @@ impl SingleThreadBuilder {
             prev_prefixes = prefixes;
             prev_suffixes = suffixes;
         }
-        // TODO : tail processing
     }
 
     /// Gather the 8 buckets addressed by `prefixes`, update each running best with

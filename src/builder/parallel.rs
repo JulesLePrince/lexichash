@@ -1,11 +1,14 @@
+use std::u64;
+use std::u128::MAX;
+
 use super::interleaved::InterleavedSlice32;
 use super::single_thread::SingleThreadBuilder;
 use crate::LexicSketch;
 use crate::slice::SketchSlice32;
-use crate::utils::{l1_cache_bytes, overlapping_chunks};
+use crate::utils::{kmer_to_string, l1_cache_bytes, overlapping_chunks, print_kmer};
 use bytemuck::cast_slice;
 use helicase::dna_format::PackedDNA;
-use rayon::prelude::*;
+use rayon::{prelude::*, range};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 /// The Sketch Builder Parameters
@@ -91,7 +94,31 @@ impl SketchBuilder {
             builder.build_with_dyn(packed_bytes, &mut res[0].0, prefetch);
         }
 
-        // TODO tail processing
+        // Tail processing
+        let tail_nb_bases = seq.len() % 64;
+        let packed_bytes_len = packed_bytes.len();
+        let bytes_before_tail = unsafe {(&packed_bytes[(packed_bytes_len - 8)..])
+            .as_ptr()
+            .cast::<u64>()
+            .read_unaligned()
+        };
+        let mut first_window: u128 = (tail << 2*(self.k - 1)) | ((bytes_before_tail >> (64 - 2*(self.k-1))) as u128);
+        let mut second_window: u64 = (tail >> (128-2*(self.k -1))) as u64;
+
+        let prefix_mask: u64 = u64::MAX >> 2*(32 - self.prefix_size);
+        let suffix_mask: u64 = u64::MAX >> 2*(32 - self.k - self.prefix_size);
+
+        for _ in 0..tail_nb_bases {
+            // kmer processing
+            let prefix = (first_window as u64) & prefix_mask;
+            let suffix = (first_window as u64 >> (2 * self.prefix_size)) & suffix_mask;
+            let s: u64 = (res[0].0[prefix as usize] >> 32) ^ suffix; // score of current kmer
+            let best: u64 = u64::min(res[0].0[prefix as usize] >> 32, s);
+            res[0].0[prefix as usize] = ((res[0].0[prefix as usize] << 32) >> 32) | (best << 32) ;
+            // rolling
+            first_window = (first_window >> 2) | (((second_window & 0b11) as u128) << 126);
+            second_window >>= 2;
+        }
     }
 
     pub fn merge_sketches(&self, sketches: &[InterleavedSlice32]) -> LexicSketch {
