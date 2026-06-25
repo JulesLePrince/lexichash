@@ -22,6 +22,12 @@ impl InterleavedSlice32 {
         )
     }
 
+    #[inline(always)]
+    pub fn write_res(&mut self, index: usize, res: u32) {
+        let slot = unsafe { self.0.get_unchecked_mut(index) };
+        *slot = ((res as u64) << 32) | (*slot & (u32::MAX as u64));
+    }
+
     /// Drop the masks and return the `best`/`res` half as a `SketchSlice32`.
     pub fn deinterleave(&self) -> SketchSlice32 {
         SketchSlice32(self.0.iter().map(|&c| (c >> 32) as u32).collect())
