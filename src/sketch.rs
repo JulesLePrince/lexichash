@@ -46,9 +46,9 @@ impl LexicSketch {
         let offset = prefix_size as f64 - (u32::BITS / 2 - suffix_size as u32) as f64;
         self.sketch_slice
             .iter_leading_zeros(&rhs.sketch_slice)
-            .fold(u32x8::ZERO, |u, v| u + v)
+            .fold(u32x8::ZERO, |u, v| u + (v >> 1))
             .reduce_add() as f64
-            / (1 << (2 * prefix_size + 1)) as f64
+            / (1 << (2 * prefix_size)) as f64
             + offset
     }
 
