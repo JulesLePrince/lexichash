@@ -82,7 +82,7 @@ impl SketchBuilder {
                     .zip(sketches.par_iter_mut())
                     .for_each(|(&packed_bytes, res)| {
                         let builder = SingleThreadBuilder::new(prefix_size, suffix_size);
-                        builder.build_with_dyn(packed_bytes, &mut res.0, prefetch);
+                        builder.build_with_dyn(packed_bytes, res, prefetch);
                     });
             });
         } else {
@@ -90,7 +90,7 @@ impl SketchBuilder {
                 sketches.push(InterleavedSlice32::from_masks(&self.masks));
             }
             let builder = SingleThreadBuilder::new(prefix_size, suffix_size);
-            builder.build_with_dyn(packed_bytes, &mut sketches[0].0, prefetch);
+            builder.build_with_dyn(packed_bytes, &mut sketches[0], prefetch);
         }
 
         // Tail processing
@@ -120,9 +120,9 @@ impl SketchBuilder {
             // kmer processing
             let prefix = (first_window as u64) & prefix_mask;
             let suffix = (first_window as u64 >> (2 * self.prefix_size)) & suffix_mask;
-            let s: u64 = (sketches[0].0[prefix as usize] >> 32) ^ suffix; // score of current kmer
-            let best: u64 = u64::min(sketches[0].0[prefix as usize] >> 32, s);
-            sketches[0].write_res(prefix as usize, best as u32);
+            let s: u64 = sketches[0].get_res(prefix as usize) as u64 ^ suffix; // score of current kmer
+            let best: u64 = u64::min(sketches[0].get_res(prefix as usize) as u64, s);
+            sketches[0].set_res(prefix as usize, best as u32);
             // rolling
             first_window = (first_window >> 2) | (((second_window & 0b11) as u128) << 126);
             second_window >>= 2;

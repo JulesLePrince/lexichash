@@ -32,7 +32,7 @@ impl PartialSketch {
             res.0
                 .iter_mut()
                 .zip(sketch.0.iter())
-                .for_each(|(r, &c)| *r = (*r).min((c >> 32) as u32));
+                .for_each(|(r, &c)| *r = (*r).min(c.1));
         });
         LexicSketch::new(self.k, self.prefix_size, res, self.num_kmers)
     }

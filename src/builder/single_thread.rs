@@ -1,4 +1,5 @@
 use super::batched_iter::BatchedKmerIterator;
+use crate::builder::interleaved::InterleavedSlice32;
 use branches::prefetch_write_data;
 use wide::u32x8;
 
@@ -33,8 +34,13 @@ impl SingleThreadBuilder {
     }
 
     #[inline(always)]
-    pub fn build_with_dyn(&self, packed_bytes: &[u8], mask_res: &mut [u64], prefetch: bool) {
-        const VECT: bool = cfg!(target_feature = "avx2");
+    pub fn build_with_dyn(
+        &self,
+        packed_bytes: &[u8],
+        mask_res: &mut InterleavedSlice32,
+        prefetch: bool,
+    ) {
+        const VECT: bool = cfg!(any(target_feature = "avx2", target_feature = "neon"));
         if prefetch {
             self.build_with::<true, VECT>(packed_bytes, mask_res);
         } else {
@@ -45,13 +51,13 @@ impl SingleThreadBuilder {
     pub fn build_with<const PREFETCH: bool, const VECT: bool>(
         &self,
         packed_bytes: &[u8],
-        mask_res: &mut [u64],
+        mask_res: &mut InterleavedSlice32,
     ) {
         assert_eq!(mask_res.len(), 1 << (2 * self.prefix_size));
 
         // Previous vars initialized to have 0 effects on first iteration
         let mut prev_prefixes: [u32; 8] = [0; 8];
-        let mut prev_suffixes: [u32; 8] = [(mask_res[0] as u32) ^ u32::MAX; 8];
+        let mut prev_suffixes: [u32; 8] = [mask_res.get_mask(0) ^ u32::MAX; 8];
 
         for (prefixes, suffixes) in self
             .get_prefix_iterator(packed_bytes)
@@ -60,12 +66,12 @@ impl SingleThreadBuilder {
             // ------ Prefetch ------
             if PREFETCH {
                 prefixes.iter().map(|&p| p as usize).for_each(|p| {
-                    prefetch_write_data::<_, 0>(&mask_res[p]);
+                    prefetch_write_data::<_, 0>(&mask_res.0[p]);
                 });
             }
 
             // ------ Calculations ------
-            Self::process_batch::<VECT>(mask_res, &prev_prefixes, &prev_suffixes);
+            Self::process_batch::<VECT>(&mut mask_res.0, &prev_prefixes, &prev_suffixes);
 
             prev_prefixes = prefixes;
             prev_suffixes = suffixes;
@@ -76,19 +82,18 @@ impl SingleThreadBuilder {
     /// `best.min(mask ^ suffix)`, and scatter the results back.
     ///
     /// With `VECT` the per-lane `xor`/`min` is vectorized, otherwise it stays scalar.
-    /// Vectorizing only paid off on AVX2.
     #[inline(always)]
     fn process_batch<const VECT: bool>(
-        mask_res: &mut [u64],
+        mask_res: &mut [(u32, u32)],
         prefixes: &[u32; 8],
         suffixes: &[u32; 8],
     ) {
         let mut masks = [0u32; 8];
         let mut bests = [0u32; 8];
         for i in 0..8 {
-            let c = unsafe { *mask_res.get_unchecked(prefixes[i] as usize) };
-            masks[i] = c as u32;
-            bests[i] = (c >> 32) as u32;
+            let (mask, best) = unsafe { *mask_res.get_unchecked(prefixes[i] as usize) };
+            masks[i] = mask;
+            bests[i] = best;
         }
 
         let results = if VECT {
@@ -105,9 +110,59 @@ impl SingleThreadBuilder {
 
         for i in 0..8 {
             unsafe {
-                *mask_res.get_unchecked_mut(prefixes[i] as usize) =
-                    ((results[i] as u64) << 32) | masks[i] as u64;
+                mask_res.get_unchecked_mut(prefixes[i] as usize).1 = results[i];
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slice::SketchSlice32;
+    use core::hint::black_box;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+    use rand_xoshiro::rand_core::{Rng, SeedableRng};
+
+    fn random_packed_bytes(num_bases: usize, seed: u64) -> Vec<u8> {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut bytes = vec![0u8; num_bases / 4];
+        rng.fill_bytes(&mut bytes);
+        bytes
+    }
+
+    fn bench_variant<const VECT: bool>(
+        name: &str,
+        packed_bytes: &[u8],
+        builder: &SingleThreadBuilder,
+        masks: &SketchSlice32,
+        rep: usize,
+    ) {
+        let bases = packed_bytes.len() * 4;
+        let start = std::time::Instant::now();
+        for _ in 0..rep {
+            let mut mask_res = InterleavedSlice32::from_masks(masks);
+            builder.build_with::<false, VECT>(black_box(packed_bytes), &mut mask_res);
+            black_box(&mask_res);
+        }
+        let elapsed = start.elapsed().as_secs_f64();
+        let gbp_s = (bases * rep) as f64 / elapsed / 1e9;
+        eprintln!("{name}: {gbp_s:.03} Gbp/s ({elapsed:.03}s total, {rep} reps)");
+    }
+
+    #[test]
+    #[ignore = "This is a benchmark, not a test"]
+    fn bench_vect_neon() {
+        let prefix_size = 6;
+        let suffix_size = 16;
+        let num_bases = 10_000_000;
+        let rep = 30;
+
+        let packed_bytes = random_packed_bytes(num_bases, 1);
+        let masks = SketchSlice32::random(prefix_size, suffix_size, 2);
+        let builder = SingleThreadBuilder::new(prefix_size, suffix_size);
+
+        bench_variant::<true>("SIMD (VECT=true)", &packed_bytes, &builder, &masks, rep);
+        bench_variant::<false>("scalar (VECT=false)", &packed_bytes, &builder, &masks, rep);
     }
 }
