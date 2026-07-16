@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use helicase::{Config, FastxParser, HelicaseParser, ParserOptions, input::*};
-use lexichash::{LexicSketch, SketchBuilder};
+use lexichash::{LexicSketch, PartialSketch, SketchBuilder};
 use std::thread;
 
 const CONFIG: Config = ParserOptions::default()
@@ -68,22 +68,24 @@ fn main() {
                     .unwrap_or(4)
             });
 
-            // Create sketch builder
-            let builder = SketchBuilder::new(args.k, args.prefix_size, threads);
-
             // Create a parser with the desired options
             let mut parser =
                 FastxParser::<CONFIG>::from_file_mmap(&args.input).expect("Cannot open the file");
 
-            let mut sketches = Vec::new();
+            // Create sketch builder
+            let builder = SketchBuilder::new(args.k, args.prefix_size, threads);
+            let mut partial_sketch = PartialSketch::new(args.k, args.prefix_size);
 
             // Iterate over records
-            while let Some(event) = parser.next() {
-                // builder.build_with(parser.get_dna_packed(), &mut sketches);
-                // builder.build_with_advanced::<false, false>(parser.get_dna_packed(), &mut sketches);
-                builder.build_with_advanced::<true, false>(parser.get_dna_packed(), &mut sketches);
+            while let Some(_event) = parser.next() {
+                let dna = parser.get_dna_packed();
+                if dna.len() >= args.k {
+                    // builder.build_with(dna, &mut partial_sketch);
+                    // builder.build_with_advanced::<false, false>(dna, &mut partial_sketch);
+                    builder.build_with_advanced::<true, false>(dna, &mut partial_sketch);
+                }
             }
-            let sketch = builder.merge_sketches(&sketches);
+            let sketch = partial_sketch.merge();
             sketch.serialize(&args.output);
         }
 
@@ -91,9 +93,10 @@ fn main() {
         Command::Compare(args) => {
             let sketch1 = LexicSketch::deserialize(args.sketch_1);
             let sketch2 = LexicSketch::deserialize(args.sketch_2);
-            let score = sketch1.average_match_size(&sketch2);
-            // TODO estimate ANI from average match size
-            println!("The score between the two sketches is {}", score);
+            let mean = sketch1.average_match_size(&sketch2);
+            let mut_rate = sketch1.get_divergence_from_mean(mean);
+            println!("The average score between the two sketches is {}", mean);
+            println!("Estimated mutation rate: {}%", mut_rate * 100.);
         }
     }
 }

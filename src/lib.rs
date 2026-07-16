@@ -1,7 +1,8 @@
 pub(crate) mod builder;
+pub(crate) mod estimator;
 pub(crate) mod sketch;
 pub(crate) mod slice;
 pub(crate) mod utils;
 
 pub use builder::parallel::SketchBuilder;
-pub use sketch::LexicSketch;
+pub use sketch::{LexicSketch, PartialSketch};

@@ -61,7 +61,8 @@ impl SketchSlice32 {
         prefix_size: usize,
         suffix_size: usize,
     ) -> impl Iterator<Item = u32x8> + 'a {
-        let offset = (prefix_size as u32).wrapping_sub(u32::BITS / 2 - suffix_size as u32);
+        let padding = u32::BITS as usize / 2 - suffix_size;
+        let offset = (prefix_size as u32).wrapping_sub(padding as u32);
         let offsets = u32x8::new([offset; 8]);
         self.iter_leading_zeros(rhs)
             .map(move |lz| (lz >> 1) + offsets)

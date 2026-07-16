@@ -1,21 +1,63 @@
+use crate::builder::interleaved::InterleavedSlice32;
+use crate::estimator::MutationRateEstimator;
 use crate::slice::SketchSlice32;
 use epserde::prelude::*;
 use std::path::Path;
 use wide::u32x8;
+
+/// Accumulates the per-thread partial sketches and the total number of k-mers
+/// seen across successive calls to [`SketchBuilder::build_with_advanced`](crate::SketchBuilder::build_with_advanced),
+/// ready to be consolidated by [`PartialSketch::merge`].
+pub struct PartialSketch {
+    k: usize,
+    prefix_size: usize,
+    pub(crate) num_kmers: usize,
+    pub(crate) sketches: Vec<InterleavedSlice32>,
+}
+
+impl PartialSketch {
+    pub fn new(k: usize, prefix_size: usize) -> Self {
+        Self {
+            k,
+            prefix_size,
+            num_kmers: 0,
+            sketches: Vec::new(),
+        }
+    }
+
+    pub fn merge(&self) -> LexicSketch {
+        let sketches = &self.sketches;
+        let mut res = sketches[0].deinterleave();
+        sketches.iter().skip(1).for_each(|sketch| {
+            res.0
+                .iter_mut()
+                .zip(sketch.0.iter())
+                .for_each(|(r, &c)| *r = (*r).min((c >> 32) as u32));
+        });
+        LexicSketch::new(self.k, self.prefix_size, res, self.num_kmers)
+    }
+}
 
 #[derive(Epserde, Debug)]
 pub struct LexicSketch {
     k: u8,
     prefix_size: u8,
     sketch_slice: SketchSlice32,
+    num_kmers: usize,
 }
 
 impl LexicSketch {
-    pub fn new(k: usize, prefix_size: usize, sketch_slice: SketchSlice32) -> Self {
+    pub fn new(
+        k: usize,
+        prefix_size: usize,
+        sketch_slice: SketchSlice32,
+        num_kmers: usize,
+    ) -> Self {
         Self {
             k: k as u8,
             prefix_size: prefix_size as u8,
             sketch_slice,
+            num_kmers,
         }
     }
 
@@ -43,7 +85,9 @@ impl LexicSketch {
     pub fn average_match_size<'a>(&'a self, rhs: &'a Self) -> f64 {
         let prefix_size = self.prefix_size as usize;
         let suffix_size = self.k as usize - prefix_size;
-        let offset = prefix_size as f64 - (u32::BITS / 2 - suffix_size as u32) as f64;
+        let padding = u32::BITS as usize / 2 - suffix_size;
+        // padding prefix will be subtracted at the end
+        let offset = prefix_size as f64 - padding as f64;
         self.sketch_slice
             .iter_leading_zeros(&rhs.sketch_slice)
             .fold(u32x8::ZERO, |u, v| u + (v >> 1))
@@ -52,8 +96,29 @@ impl LexicSketch {
             + offset
     }
 
-    pub fn get_score(&self, sk: &Self) -> f64 {
-        todo!();
+    #[inline(always)]
+    pub fn get_divergence(&self, sk: &Self) -> f64 {
+        self.get_divergence_with(sk, &self.make_estimator())
+    }
+
+    #[inline(always)]
+    pub fn get_divergence_with(&self, sk: &Self, est: &MutationRateEstimator) -> f64 {
+        Self::get_divergence_from_mean_with(self.average_match_size(sk), est)
+    }
+
+    #[inline(always)]
+    pub fn get_divergence_from_mean(&self, mean: f64) -> f64 {
+        Self::get_divergence_from_mean_with(mean, &self.make_estimator())
+    }
+
+    #[inline(always)]
+    pub fn get_divergence_from_mean_with(mean: f64, est: &MutationRateEstimator) -> f64 {
+        est.estimate_mut_rate::<2>(mean)
+    }
+
+    #[inline(always)]
+    fn make_estimator(&self) -> MutationRateEstimator {
+        MutationRateEstimator::new(self.k as usize, self.num_kmers)
     }
 }
 
@@ -75,11 +140,13 @@ mod tests {
             k,
             prefix_size,
             SketchSlice32::random(prefix_size, suffix_size, 1),
+            1_000_000,
         );
         let sketch2 = LexicSketch::new(
             k,
             prefix_size,
             SketchSlice32::random(prefix_size, suffix_size, 2),
+            1_000_000,
         );
 
         let start = std::time::Instant::now();

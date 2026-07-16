@@ -7,8 +7,8 @@ edition = "2024"
 branches = { version = "0.4", features = ["prefetch"] }
 bytemuck = "1.25"
 clap = { version = "4.6", features = ["derive"] }
-epserde = "0.12"
-helicase = "0.1"
+epserde = "0.13"
+helicase = "0.2"
 libc = "0.2"
 rand_xoshiro = "0.8"
 rayon = "1.12"
