@@ -94,22 +94,29 @@ impl SketchBuilder {
         }
 
         // Tail processing
-        let tail_nb_bases = seq.len() % 64;
         let packed_bytes_len = packed_bytes.len();
-        let bytes_before_tail = unsafe {
-            (packed_bytes[(packed_bytes_len - 8)..])
-                .as_ptr()
-                .cast::<u64>()
-                .read_unaligned()
+        // When the contig is shorter than one 64-base block, `packed_bytes` is empty:
+        // there is no preceding block to seed history bits from, so `tail` alone holds
+        // the whole contig and every k-mer start is processed here, unshifted.
+        let (mut first_window, mut second_window, tail_iterations) = if packed_bytes_len == 0 {
+            (tail, 0u64, seq.len().saturating_sub(self.k - 1))
+        } else {
+            let bytes_before_tail = unsafe {
+                (packed_bytes[(packed_bytes_len - 8)..])
+                    .as_ptr()
+                    .cast::<u64>()
+                    .read_unaligned()
+            };
+            let first_window = (tail << (2 * (self.k - 1)))
+                | ((bytes_before_tail >> (64 - 2 * (self.k - 1))) as u128);
+            let second_window = (tail >> (128 - 2 * (self.k - 1))) as u64;
+            (first_window, second_window, seq.len() % 64)
         };
-        let mut first_window: u128 =
-            (tail << (2 * (self.k - 1))) | ((bytes_before_tail >> (64 - 2 * (self.k - 1))) as u128);
-        let mut second_window: u64 = (tail >> (128 - 2 * (self.k - 1))) as u64;
 
         let prefix_mask = u64::MAX >> (2 * (32 - self.prefix_size));
         let suffix_mask = u64::MAX >> (2 * (32 - self.k - self.prefix_size));
 
-        for _ in 0..tail_nb_bases {
+        for _ in 0..tail_iterations {
             // kmer processing
             let prefix = (first_window as u64) & prefix_mask;
             let suffix = (first_window as u64 >> (2 * self.prefix_size)) & suffix_mask;
