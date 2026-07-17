@@ -68,23 +68,6 @@ pub fn l1_cache_bytes() -> usize {
     FALLBACK
 }
 
-/*
-pub fn get_u64_unaligned(sli: &[u32], i: usize) -> u64 {
-    // TODO: avoid bound checks, this is slow
-
-    // 1. Quick bounds check to ensure i + 1 exists (or use get() to avoid panics)
-    if i + 1 >= sli.len() {
-        panic!("Index out of bounds");
-    }
-
-    // 2. Get the raw pointer to the i-th element
-    let ptr = unsafe { sli.as_ptr().add(i) as *const u64 };
-
-    // 3. Read it as a u64
-    unsafe { core::ptr::read_unaligned(ptr) }
-}
-*/
-
 /// Decodes the `k` low bases of a 2-bit packed k-mer into `buf` as ASCII.
 #[allow(unused)]
 pub fn kmer_to_ascii(kmer: u32, k: usize, buf: &mut [u8]) {
@@ -103,7 +86,7 @@ pub fn kmer_to_ascii(kmer: u32, k: usize, buf: &mut [u8]) {
 pub fn kmer_to_string(kmer: u32, k: usize) -> String {
     let mut buf = [0u8; 32];
     kmer_to_ascii(kmer, k, &mut buf);
-    String::from_utf8(buf[..k].to_vec()).expect("Invalid UTF-8 sequence")
+    unsafe { String::from_utf8_unchecked(buf[..k].to_vec()) }
 }
 
 /// Prints a 2-bit packed k-mer to stdout without allocating.

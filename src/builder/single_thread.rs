@@ -10,7 +10,7 @@ pub struct SingleThreadBuilder {
 }
 
 impl SingleThreadBuilder {
-    pub fn new(prefix_size: usize, suffix_size: usize) -> Self {
+    pub const fn new(prefix_size: usize, suffix_size: usize) -> Self {
         Self {
             prefix_size,
             suffix_size,
@@ -34,7 +34,7 @@ impl SingleThreadBuilder {
     }
 
     #[inline(always)]
-    pub fn build_with_dyn(
+    pub fn process_seq(
         &self,
         packed_bytes: &[u8],
         mask_res: &mut InterleavedSlice32,
@@ -42,13 +42,13 @@ impl SingleThreadBuilder {
     ) {
         const VECT: bool = cfg!(any(target_feature = "avx2", target_feature = "neon"));
         if prefetch {
-            self.build_with::<true, VECT>(packed_bytes, mask_res);
+            self.process_seq_advanced::<true, VECT>(packed_bytes, mask_res);
         } else {
-            self.build_with::<false, VECT>(packed_bytes, mask_res);
+            self.process_seq_advanced::<false, VECT>(packed_bytes, mask_res);
         }
     }
 
-    pub fn build_with<const PREFETCH: bool, const VECT: bool>(
+    pub fn process_seq_advanced<const PREFETCH: bool, const VECT: bool>(
         &self,
         packed_bytes: &[u8],
         mask_res: &mut InterleavedSlice32,
@@ -66,12 +66,12 @@ impl SingleThreadBuilder {
             // ------ Prefetch ------
             if PREFETCH {
                 prefixes.iter().map(|&p| p as usize).for_each(|p| {
-                    prefetch_write_data::<_, 0>(&mask_res.0[p]);
+                    prefetch_write_data::<_, 0>(unsafe { mask_res.0.as_ptr().add(p) });
                 });
             }
 
             // ------ Calculations ------
-            Self::process_batch::<VECT>(&mut mask_res.0, &prev_prefixes, &prev_suffixes);
+            Self::process_chunk::<VECT>(mask_res, &prev_prefixes, &prev_suffixes);
 
             prev_prefixes = prefixes;
             prev_suffixes = suffixes;
@@ -83,17 +83,15 @@ impl SingleThreadBuilder {
     ///
     /// With `VECT` the per-lane `xor`/`min` is vectorized, otherwise it stays scalar.
     #[inline(always)]
-    fn process_batch<const VECT: bool>(
-        mask_res: &mut [(u32, u32)],
+    fn process_chunk<const VECT: bool>(
+        mask_res: &mut InterleavedSlice32,
         prefixes: &[u32; 8],
         suffixes: &[u32; 8],
     ) {
         let mut masks = [0u32; 8];
         let mut bests = [0u32; 8];
-        for i in 0..8 {
-            let (mask, best) = unsafe { *mask_res.get_unchecked(prefixes[i] as usize) };
-            masks[i] = mask;
-            bests[i] = best;
+        for ((mask, best), &prefix) in masks.iter_mut().zip(bests.iter_mut()).zip(prefixes) {
+            (*mask, *best) = mask_res.get_mask_res(prefix as usize);
         }
 
         let results = if VECT {
@@ -102,16 +100,17 @@ impl SingleThreadBuilder {
                 .to_array()
         } else {
             let mut results = [0u32; 8];
-            for i in 0..8 {
-                results[i] = bests[i].min(masks[i] ^ suffixes[i]);
+            for (result, (&best, (&mask, &suffix))) in results
+                .iter_mut()
+                .zip(bests.iter().zip(masks.iter().zip(suffixes)))
+            {
+                *result = best.min(mask ^ suffix);
             }
             results
         };
 
-        for i in 0..8 {
-            unsafe {
-                mask_res.get_unchecked_mut(prefixes[i] as usize).1 = results[i];
-            }
+        for (&result, &prefix) in results.iter().zip(prefixes) {
+            mask_res.set_res(prefix as usize, result);
         }
     }
 }
@@ -142,7 +141,7 @@ mod tests {
         let start = std::time::Instant::now();
         for _ in 0..rep {
             let mut mask_res = InterleavedSlice32::from_masks(masks);
-            builder.build_with::<false, VECT>(black_box(packed_bytes), &mut mask_res);
+            builder.process_seq_advanced::<false, VECT>(black_box(packed_bytes), &mut mask_res);
             black_box(&mask_res);
         }
         let elapsed = start.elapsed().as_secs_f64();

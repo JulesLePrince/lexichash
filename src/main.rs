@@ -80,9 +80,7 @@ fn main() {
             while let Some(_event) = parser.next() {
                 let dna = parser.get_dna_packed();
                 if dna.len() >= args.k {
-                    // builder.build_with(dna, &mut partial_sketch);
-                    // builder.build_with_advanced::<false, false>(dna, &mut partial_sketch);
-                    builder.build_with_advanced::<true, false>(dna, &mut partial_sketch);
+                    builder.process_seq(dna, &mut partial_sketch);
                 }
             }
             let sketch = partial_sketch.merge();
@@ -93,10 +91,12 @@ fn main() {
         Command::Compare(args) => {
             let sketch1 = LexicSketch::deserialize(args.sketch_1);
             let sketch2 = LexicSketch::deserialize(args.sketch_2);
-            let mean = sketch1.average_match_size(&sketch2);
-            let mut_rate = sketch1.get_divergence_from_mean(mean);
-            println!("The average score between the two sketches is {}", mean);
-            println!("Estimated mutation rate: {}%", mut_rate * 100.);
+            let score = sketch1.average_match_size(&sketch2);
+            println!("Average prefix match: {:.2} bp", score);
+            match sketch1.estimate_divergence_from_score(score) {
+                Some(mut_rate) => println!("Estimated mutation rate: {:.2}%", mut_rate * 100.),
+                None => println!("Mutation rate too high for the estimator"),
+            }
         }
     }
 }

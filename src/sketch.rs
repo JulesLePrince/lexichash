@@ -6,7 +6,7 @@ use std::path::Path;
 use wide::u32x8;
 
 /// Accumulates the per-thread partial sketches and the total number of k-mers
-/// seen across successive calls to [`SketchBuilder::build_with_advanced`](crate::SketchBuilder::build_with_advanced),
+/// seen across successive calls to [`SketchBuilder::process_seq_advanced`](crate::SketchBuilder::process_seq_advanced),
 /// ready to be consolidated by [`PartialSketch::merge`].
 pub struct PartialSketch {
     k: usize,
@@ -16,7 +16,7 @@ pub struct PartialSketch {
 }
 
 impl PartialSketch {
-    pub fn new(k: usize, prefix_size: usize) -> Self {
+    pub const fn new(k: usize, prefix_size: usize) -> Self {
         Self {
             k,
             prefix_size,
@@ -47,7 +47,7 @@ pub struct LexicSketch {
 }
 
 impl LexicSketch {
-    pub fn new(
+    pub const fn new(
         k: usize,
         prefix_size: usize,
         sketch_slice: SketchSlice32,
@@ -61,25 +61,25 @@ impl LexicSketch {
         }
     }
 
-    pub fn get_k(&self) -> u8 {
+    pub const fn get_k(&self) -> u8 {
         self.k
     }
 
-    pub fn get_prefix_size(&self) -> u8 {
+    pub const fn get_prefix_size(&self) -> u8 {
         self.prefix_size
     }
 
-    pub fn get_sketch_slice(&self) -> &SketchSlice32 {
+    pub const fn get_sketch_slice(&self) -> &SketchSlice32 {
         &self.sketch_slice
     }
 
     pub fn serialize<P: AsRef<Path>>(&self, output_path: P) {
-        unsafe { self.store(output_path).expect("Failed to lexichash data") }
+        unsafe { self.store(output_path).expect("Failed to serialize sketch") }
     }
 
-    pub fn deserialize<P: AsRef<Path>>(input_path: P) -> LexicSketch {
+    pub fn deserialize<P: AsRef<Path>>(input_path: P) -> Self {
         // Fully allocates and copies the file into memory
-        unsafe { <LexicSketch>::load_full(input_path).expect("Failed to load fully") }
+        unsafe { <Self>::load_full(input_path).expect("Failed to deserialize sketch") }
     }
 
     pub fn average_match_size<'a>(&'a self, rhs: &'a Self) -> f64 {
@@ -97,27 +97,28 @@ impl LexicSketch {
     }
 
     #[inline(always)]
-    pub fn get_divergence(&self, sk: &Self) -> f64 {
-        self.get_divergence_with(sk, &self.make_estimator())
+    pub fn estimate_divergence(&self, sk: &Self) -> Option<f64> {
+        Self::estimate_divergence_from_score_with::<2>(
+            self.average_match_size(sk),
+            &self.make_estimator(),
+        )
     }
 
     #[inline(always)]
-    pub fn get_divergence_with(&self, sk: &Self, est: &MutationRateEstimator) -> f64 {
-        Self::get_divergence_from_mean_with(self.average_match_size(sk), est)
+    pub fn estimate_divergence_from_score(&self, score: f64) -> Option<f64> {
+        Self::estimate_divergence_from_score_with::<2>(score, &self.make_estimator())
     }
 
     #[inline(always)]
-    pub fn get_divergence_from_mean(&self, mean: f64) -> f64 {
-        Self::get_divergence_from_mean_with(mean, &self.make_estimator())
+    pub fn estimate_divergence_from_score_with<const NEWTON_STEPS: usize>(
+        score: f64,
+        est: &MutationRateEstimator,
+    ) -> Option<f64> {
+        est.estimate_mut_rate::<NEWTON_STEPS>(score)
     }
 
     #[inline(always)]
-    pub fn get_divergence_from_mean_with(mean: f64, est: &MutationRateEstimator) -> f64 {
-        est.estimate_mut_rate::<2>(mean)
-    }
-
-    #[inline(always)]
-    fn make_estimator(&self) -> MutationRateEstimator {
+    pub fn make_estimator(&self) -> MutationRateEstimator {
         MutationRateEstimator::new(self.k as usize, self.num_kmers)
     }
 }

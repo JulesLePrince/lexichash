@@ -40,7 +40,7 @@ impl MutationRateEstimator {
 
     #[allow(clippy::missing_safety_doc)]
     #[inline(always)]
-    pub unsafe fn new_uninit() -> Self {
+    pub const unsafe fn new_uninit() -> Self {
         Self {
             k: 0,
             m: 0.0,
@@ -134,19 +134,14 @@ impl MutationRateEstimator {
         self.b2_inv = 1.0 / b2;
     }
 
-    #[inline(always)]
-    pub fn k(&self) -> usize {
-        self.k
-    }
-
     /// Estimate the mutation rate from an observed mean score.
     ///
     /// `NEWTON_STEPS` corresponds to the number of refinement steps, 2 is usually enough.
-    /// Returns `f64::NAN` if `score` is out of the reachable range for this `(n, k)`.
+    /// Returns `None` if `score` is out of the reachable range for this `(n, k)`.
     #[inline(always)]
-    pub fn estimate_mut_rate<const NEWTON_STEPS: usize>(&self, score: f64) -> f64 {
+    pub fn estimate_mut_rate<const NEWTON_STEPS: usize>(&self, score: f64) -> Option<f64> {
         if !(self.sigma_phi..=self.k as f64).contains(&score) {
-            return f64::NAN;
+            return None;
         }
 
         // Closed-form seed.
@@ -164,7 +159,7 @@ impl MutationRateEstimator {
             rho = (rho - f / fp).max(0.0);
         }
 
-        rho
+        Some(rho)
     }
 }
 
@@ -190,7 +185,7 @@ mod tests {
     fn seed_only_is_in_the_right_ballpark() {
         let est = MutationRateEstimator::new(K, N);
         for (rho, score) in CASES {
-            let recovered = est.estimate_mut_rate::<0>(score);
+            let recovered = est.estimate_mut_rate::<0>(score).unwrap();
             assert!(
                 (recovered - rho).abs() / rho < 0.10,
                 "rho={rho}: recovered={recovered}"
@@ -202,7 +197,7 @@ mod tests {
     fn two_newton_steps_match_python_within_half_a_percent() {
         let est = MutationRateEstimator::new(K, N);
         for (rho, score) in CASES {
-            let recovered = est.estimate_mut_rate::<2>(score);
+            let recovered = est.estimate_mut_rate::<2>(score).unwrap();
             let rel_err = (recovered - rho).abs() / rho;
             assert!(
                 rel_err < 0.005,
@@ -215,9 +210,9 @@ mod tests {
     fn newton_iteration_converges_and_does_not_diverge() {
         let est = MutationRateEstimator::new(K, N);
         for (rho, score) in CASES {
-            let r2 = est.estimate_mut_rate::<2>(score);
-            let r5 = est.estimate_mut_rate::<5>(score);
-            let r8 = est.estimate_mut_rate::<8>(score);
+            let r2 = est.estimate_mut_rate::<2>(score).unwrap();
+            let r5 = est.estimate_mut_rate::<5>(score).unwrap();
+            let r8 = est.estimate_mut_rate::<8>(score).unwrap();
             assert!((r2 - r5).abs() / rho < 0.005, "rho={rho}: r2={r2}, r5={r5}");
             assert!(
                 (r5 - r8).abs() < 1e-9,
@@ -227,10 +222,10 @@ mod tests {
     }
 
     #[test]
-    fn out_of_range_score_returns_nan() {
+    fn out_of_range_score_returns_none() {
         let est = MutationRateEstimator::new(K, N);
-        assert!(est.estimate_mut_rate::<2>(K as f64 + 1.0).is_nan());
-        assert!(est.estimate_mut_rate::<2>(0.0).is_nan());
+        assert!(est.estimate_mut_rate::<2>(K as f64 + 1.0).is_none());
+        assert!(est.estimate_mut_rate::<2>(0.0).is_none());
     }
 
     #[test]
@@ -251,7 +246,7 @@ mod tests {
         let mut est = MutationRateEstimator::new(K, N);
         est.rebuild_precise(K, N);
         for (rho, score) in CASES {
-            let recovered = est.estimate_mut_rate::<2>(score);
+            let recovered = est.estimate_mut_rate::<2>(score).unwrap();
             let rel_err = (recovered - rho).abs() / rho;
             assert!(
                 rel_err < 0.005,
@@ -267,8 +262,8 @@ mod tests {
         precise_est.rebuild_precise(K, N);
         let fast_est = MutationRateEstimator::new(K, N);
         for (rho, score) in CASES {
-            let precise = precise_est.estimate_mut_rate::<2>(score);
-            let fast = fast_est.estimate_mut_rate::<2>(score);
+            let precise = precise_est.estimate_mut_rate::<2>(score).unwrap();
+            let fast = fast_est.estimate_mut_rate::<2>(score).unwrap();
             let rel_err = (precise - fast).abs() / rho;
             assert!(
                 rel_err < 0.005,
@@ -288,7 +283,7 @@ mod tests {
         let start = std::time::Instant::now();
         let mut acc = 0.0;
         for _ in 0..rep {
-            acc += est.estimate_mut_rate::<2>(black_box(15.0));
+            acc += est.estimate_mut_rate::<2>(black_box(15.0)).unwrap();
         }
         black_box(acc);
         eprintln!(

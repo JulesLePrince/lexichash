@@ -8,7 +8,7 @@ pub struct BatchedKmerIterator<'a> {
 }
 
 impl<'a> BatchedKmerIterator<'a> {
-    pub fn new(k: usize, packed_bytes: &'a [u8], initial_shift_bases: usize) -> Self {
+    pub const fn new(k: usize, packed_bytes: &'a [u8], initial_shift_bases: usize) -> Self {
         let filter_mask = u32::MAX >> (32 - 2 * k);
         let pos_bytes = initial_shift_bases / 4;
         let bit_offset = ((initial_shift_bases % 4) * 2) as u32;
@@ -19,10 +19,6 @@ impl<'a> BatchedKmerIterator<'a> {
             bit_offset,
             filter_mask,
         }
-    }
-
-    pub fn remainder_bytes(&self) -> &'a [u8] {
-        &self.packed_bytes[self.pos_bytes..]
     }
 }
 
@@ -46,14 +42,14 @@ impl<'a> Iterator for BatchedKmerIterator<'a> {
         let m = self.filter_mask;
         // Extract the 8 kmers
         let kmers = [
-            ((window >> 0) as u32) & m,
-            ((window >> 2) as u32) & m,
-            ((window >> 4) as u32) & m,
-            ((window >> 6) as u32) & m,
-            ((window >> 8) as u32) & m,
-            ((window >> 10) as u32) & m,
-            ((window >> 12) as u32) & m,
-            ((window >> 14) as u32) & m,
+            window as u32 & m,
+            (window >> 2) as u32 & m,
+            (window >> 4) as u32 & m,
+            (window >> 6) as u32 & m,
+            (window >> 8) as u32 & m,
+            (window >> 10) as u32 & m,
+            (window >> 12) as u32 & m,
+            (window >> 14) as u32 & m,
         ];
 
         self.pos_bytes += 2;

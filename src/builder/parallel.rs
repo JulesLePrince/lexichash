@@ -48,11 +48,11 @@ impl SketchBuilder {
     }
 
     #[inline(always)]
-    pub fn build_with(&self, seq: &PackedDNA, res: &mut PartialSketch) {
-        self.build_with_advanced::<true, true>(seq, res);
+    pub fn process_seq(&self, seq: &PackedDNA, res: &mut PartialSketch) {
+        self.process_seq_advanced::<true, false>(seq, res);
     }
 
-    pub fn build_with_advanced<const PAR: bool, const PREFETCH: bool>(
+    pub fn process_seq_advanced<const PAR: bool, const PREFETCH: bool>(
         &self,
         seq: &PackedDNA,
         res: &mut PartialSketch,
@@ -82,7 +82,7 @@ impl SketchBuilder {
                     .zip(sketches.par_iter_mut())
                     .for_each(|(&packed_bytes, res)| {
                         let builder = SingleThreadBuilder::new(prefix_size, suffix_size);
-                        builder.build_with_dyn(packed_bytes, res, prefetch);
+                        builder.process_seq(packed_bytes, res, prefetch);
                     });
             });
         } else {
@@ -90,7 +90,7 @@ impl SketchBuilder {
                 sketches.push(InterleavedSlice32::from_masks(&self.masks));
             }
             let builder = SingleThreadBuilder::new(prefix_size, suffix_size);
-            builder.build_with_dyn(packed_bytes, &mut sketches[0], prefetch);
+            builder.process_seq(packed_bytes, &mut sketches[0], prefetch);
         }
 
         // Tail processing

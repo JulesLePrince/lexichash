@@ -17,11 +17,10 @@ impl InterleavedSlice32 {
     }
 
     #[inline(always)]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
-    #[allow(unused)]
     #[inline(always)]
     pub fn get_mask_res(&self, index: usize) -> (u32, u32) {
         unsafe { *self.0.get_unchecked(index) }
