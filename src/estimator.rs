@@ -70,8 +70,11 @@ impl MutationRateEstimator {
         let e0 = kf - sigma_phi;
 
         let width = kf - log4_n;
-        let mu = (log4_n + kf) / 2.0 + MU_INF - MU_A * (-width / MU_TAU).exp();
-        let sigma2 = width * width / 12.0 + SIGMA2_SLOPE * width + SIGMA2_INTERCEPT;
+        let half_sum_plus_mu_inf = (log4_n + kf).mul_add(0.5, MU_INF);
+        let exp_val = (-width / MU_TAU).exp();
+        let mu = (-MU_A).mul_add(exp_val, half_sum_plus_mu_inf);
+        let linear = SIGMA2_SLOPE.mul_add(width, SIGMA2_INTERCEPT);
+        let sigma2 = (width * width).mul_add(1.0 / 12.0, linear);
 
         self.set_moments(k, m, sigma_phi, e0, mu, sigma2);
     }
@@ -81,38 +84,38 @@ impl MutationRateEstimator {
         assert!(k >= 1, "k must be at least 1");
 
         let n = num_kmers as f64;
-        let m = n.ln() * LN4_INV - 0.8;
+        let m = n.ln().mul_add(LN4_INV, -0.8);
 
-        let mut p = 0.25_f64; // 4^-1, 4^-2, ... as we go
+        let mut p = 0.25; // 4^-1, 4^-2, ... as we go
         let mut c_prev = 1.0 - (-n * p).exp();
         let mut s = 0.0_f64;
-        let mut sigma_phi = 0.0_f64;
-        let mut e0 = 0.0_f64;
-        let mut sum_j_e = 0.0_f64;
-        let mut sum_j2_e = 0.0_f64;
+        let mut sigma_phi = 0.0;
+        let mut e0 = 0.0;
+        let mut sum_j_e = 0.0;
+        let mut sum_j2_e = 0.0;
 
         for j in 1..=k {
             let jf = j as f64;
 
-            let phi_j = c_prev * c_prev + s * (1.0 / 3.0);
+            let phi_j = s.mul_add(1.0 / 3.0, c_prev * c_prev);
             let e_j = 1.0 - phi_j;
 
             sigma_phi += phi_j;
             e0 += e_j;
-            sum_j_e += jf * e_j;
-            sum_j2_e += jf * jf * e_j;
+            sum_j_e = jf.mul_add(e_j, sum_j_e);
+            sum_j2_e = (jf * jf).mul_add(e_j, sum_j2_e);
 
             if j < k {
                 p *= 0.25;
                 let c_next = 1.0 - (-n * p).exp();
                 let d = c_prev - c_next;
-                s = d * d + s / 4.0;
+                s = d.mul_add(d, s * 0.25);
                 c_prev = c_next;
             }
         }
 
         let mu = sum_j_e / e0;
-        let sigma2 = sum_j2_e / e0 - mu * mu;
+        let sigma2 = mu.mul_add(-mu, sum_j2_e / e0);
 
         self.set_moments(k, m, sigma_phi, e0, mu, sigma2);
     }
@@ -120,7 +123,7 @@ impl MutationRateEstimator {
     #[inline(always)]
     fn set_moments(&mut self, k: usize, m: f64, sigma_phi: f64, e0: f64, mu: f64, sigma2: f64) {
         let b1 = mu + m;
-        let b2 = sigma2 + m * m;
+        let b2 = m.mul_add(m, sigma2);
 
         self.k = k;
         self.m = m;
@@ -147,15 +150,18 @@ impl MutationRateEstimator {
         // Closed-form seed.
         let r = ((score - self.sigma_phi) * self.e0_inv).clamp(f64::MIN_POSITIVE, 1.0);
         let log_r = r.ln();
-        let disc = (self.b1 * self.b1 + 2.0 * self.b2 * log_r).max(0.0);
+        let disc = (2.0 * log_r).mul_add(self.b2, self.b1 * self.b1).max(0.0);
         let mut rho = ((self.b1 - disc.sqrt()) * self.b2_inv).max(0.0);
 
         // Newton refinement.
         for _ in 0..NEWTON_STEPS {
-            let w = 1.0 / (1.0 + self.m * rho);
-            let t = self.e0 * (-self.mu * rho + 0.5 * self.sigma2 * rho * rho).exp();
-            let f = self.sigma_phi + w * t - score;
-            let fp = w * t * (self.sigma2 * rho - self.mu - self.m * w);
+            let w = 1.0 / self.m.mul_add(rho, 1.0);
+            let quad = (0.5 * self.sigma2).mul_add(rho, -self.mu);
+            let t = self.e0 * (quad * rho).exp();
+            let wt = w * t;
+            let f = wt + (self.sigma_phi - score);
+            let sigma2_rho_minus_mu = self.sigma2.mul_add(rho, -self.mu);
+            let fp = wt * (-self.m).mul_add(w, sigma2_rho_minus_mu);
             rho = (rho - f / fp).max(0.0);
         }
 
@@ -307,6 +313,25 @@ mod tests {
         black_box(&est);
         eprintln!(
             "rebuild: {:.02} ns/call",
+            start.elapsed().as_secs_f64() * 1e9 / rep as f64
+        );
+    }
+
+    #[test]
+    #[ignore = "This is a benchmark, not a test"]
+    fn bench_rebuild_precise() {
+        use core::hint::black_box;
+
+        let mut est = MutationRateEstimator::new(K, N);
+        let rep = 500_000;
+
+        let start = std::time::Instant::now();
+        for _ in 0..rep {
+            est.rebuild_precise(K, black_box(N));
+        }
+        black_box(&est);
+        eprintln!(
+            "rebuild_precise: {:.02} ns/call",
             start.elapsed().as_secs_f64() * 1e9 / rep as f64
         );
     }
